@@ -1,0 +1,60 @@
+{
+  "icao": "KLAX",
+  "iata": "LAX",
+  "name": "Los Angeles International Airport",
+  "latitude": 33.9416,
+  "longitude": -118.4085,
+  "elevation": 125,
+  "defaultLandingRunway": "24R",
+  "defaultTakeoffRunway": "24L",
+  "runways": [
+    {
+      "name1": "06L",
+      "name2": "24R",
+      "heading1": 69,
+      "heading2": 249,
+      "length": 8926,
+      "width": 150
+    },
+    {
+      "name1": "06R",
+      "name2": "24L",
+      "heading1": 69,
+      "heading2": 249,
+      "length": 10285,
+      "width": 150
+    },
+    {
+      "name1": "07L",
+      "name2": "25R",
+      "heading1": 73,
+      "heading2": 253,
+      "length": 11095,
+      "width": 150
+    },
+    {
+      "name1": "07R",
+      "name2": "25L",
+      "heading1": 73,
+      "heading2": 253,
+      "length": 12091,
+      "width": 200
+    }
+  ],
+  "waypoints": [
+    {"name": "SADDE", "x": -20, "y": 20, "type": "IAF"},
+    {"name": "LIMAA", "x": 20, "y": 15, "type": "IAF"},
+    {"name": "DARTS", "x": -15, "y": -20, "type": "IAF"},
+    {"name": "BASET", "x": 15, "y": -15, "type": "IAF"},
+    {"name": "DOTSS", "x": -35, "y": 0, "type": "SID"},
+    {"name": "REYES", "x": 0, "y": 35, "type": "SID"},
+    {"name": "SNDGG", "x": 30, "y": -25, "type": "SID"},
+    {"name": "FILLM", "x": -15, "y": -35, "type": "SID"}
+  ],
+  "routes": [
+    {"name": "DOTSS1", "type": "SID", "waypoints": ["DOTSS"], "runway": "24R"},
+    {"name": "REYES1", "type": "SID", "waypoints": ["REYES"], "runway": "24L"},
+    {"name": "SNDGG1", "type": "SID", "waypoints": ["SNDGG"], "runway": "06L"},
+    {"name": "FILLM1", "type": "SID", "waypoints": ["FILLM"], "runway": "06R"}
+  ]
+}

@@ -4,6 +4,7 @@ import (
 	"atc-sim/internal/aircraft"
 	"atc-sim/internal/airport"
 	"atc-sim/internal/atc"
+	"atc-sim/internal/data"
 	"atc-sim/internal/render"
 	"fmt"
 	"image/color"
@@ -70,7 +71,7 @@ func NewGame() *Game {
 		Renderer:      render.NewRenderer(1280, 720, 8.0),
 		InputHandler:  NewInputHandler(),
 		State:         "MENU",
-		MenuAirports:  []string{"LHBP", "KJFK", "KLAX"},
+		MenuAirports:  data.GetAirportList(),
 		MenuSelection: 0,
 		LastUpdate:    time.Now(),
 	}
@@ -81,9 +82,8 @@ func NewGame() *Game {
 func (g *Game) startGame(icao string) {
 	apt := airport.GetAirport(icao)
 
-	// Default runways per airport
-	defaultLanding := map[string]string{"LHBP": "13R", "KJFK": "13R", "KLAX": "24R"}
-	defaultTakeoff := map[string]string{"LHBP": "13L", "KJFK": "13L", "KLAX": "24L"}
+	// Default runways from data
+	defaultLanding, defaultTakeoff := data.GetDefaultRunways(icao)
 
 	g.Airport = apt
 	g.Waypoints = airport.GetWaypoints(apt.ICAO)
@@ -97,8 +97,8 @@ func (g *Game) startGame(icao string) {
 	g.Score = 100
 	g.CommandMode = ""
 	g.CommandInput = ""
-	g.ActiveLandingRunway = defaultLanding[icao]
-	g.ActiveTakeoffRunway = defaultTakeoff[icao]
+	g.ActiveLandingRunway = defaultLanding
+	g.ActiveTakeoffRunway = defaultTakeoff
 	g.SpawnInterval = 90.0
 	g.DepSpawnInterval = 120.0
 	g.Difficulty = 1
@@ -115,26 +115,9 @@ func (g *Game) startGame(icao string) {
 
 // spawnInitialAircraft spawns the initial set of aircraft
 func (g *Game) spawnInitialAircraft() {
-	// Arrivals from different directions
-	arrivals := []struct {
-		callsign string
-		typeCode string
-		x, y     float64
-		heading  float64
-		altitude float64
-		speed    float64
-	}{
-		{"AAL123", "B738", -20, 15, 90, 8000, 250},
-		{"DAL456", "A320", 15, 20, 180, 10000, 280},
-		{"UAL789", "B77W", -15, -20, 45, 12000, 300},
-	}
-
-	for _, arr := range arrivals {
-		a := aircraft.NewAircraft(arr.callsign, arr.typeCode, arr.x, arr.y, arr.altitude, arr.heading, arr.speed)
-		a.IsArrival = true
-		a.Phase = aircraft.PhaseArrival
-		g.Aircraft = append(g.Aircraft, a)
-		g.UsedCallsigns[arr.callsign] = true
+	// Spawn 3 arrivals (will use STARs if available)
+	for i := 0; i < 3; i++ {
+		g.spawnArrival()
 	}
 
 	// Departures — use the active takeoff runway plus a parallel if one exists
@@ -181,8 +164,20 @@ var airlinePrefixes = []string{
 	"AAL", "DAL", "UAL", "SWA", "JBU", "CSA", "AFL", "SAS",
 }
 
-var aircraftTypePool = []string{
-	"B738", "A320", "B77W", "A359", "B752", "A21N", "E75L", "CRJ9",
+func getAircraftTypePool() []string {
+	var pool []string
+	for icao, t := range aircraft.AircraftTypes {
+		// Exclude super-heavy aircraft (J wake turbulence) from random spawning
+		if t.WakeTurbulence != "J" {
+			pool = append(pool, icao)
+		}
+	}
+	return pool
+}
+
+func randomAircraftType() string {
+	pool := getAircraftTypePool()
+	return pool[rand.Intn(len(pool))]
 }
 
 // generateCallsign returns a unique random callsign
@@ -200,53 +195,153 @@ func (g *Game) generateCallsign() string {
 	return fmt.Sprintf("SIM%d", int(g.SimTime))
 }
 
-// spawnArrival spawns a new arrival from a random direction at ~30 nm out
-func (g *Game) spawnArrival() {
-	typeCode := aircraftTypePool[rand.Intn(len(aircraftTypePool))]
-	callsign := g.generateCallsign()
-
-	// Pick a random angle and place the aircraft ~28-35 nm from airport
-	angle := rand.Float64() * 360
-	dist := 28.0 + rand.Float64()*7.0
-	angleRad := (90 - angle) * math.Pi / 180
-	x := dist * math.Cos(angleRad)
-	y := dist * math.Sin(angleRad)
-
-	// Heading roughly toward the airport with ±20° variation
-	toAirport := airport.HeadingTo(x, y, 0, 0)
-	heading := toAirport + (rand.Float64()*40 - 20)
-	if heading < 0 {
-		heading += 360
+// isSafeToSpawn checks that a proposed spawn position has enough separation
+// from all existing airborne aircraft (at least 8nm horizontal or 2000ft vertical).
+func (g *Game) isSafeToSpawn(x, y, altitude float64) bool {
+	const minHoriz = 8.0  // nm — generous buffer above the 5nm separation minimum
+	const minVert = 2000.0 // ft — generous buffer above the 1000ft separation minimum
+	for _, a := range g.Aircraft {
+		if a.Phase == aircraft.PhaseHoldingShort || a.Phase == aircraft.PhaseLineUpWait ||
+			a.Phase == aircraft.PhaseLanded {
+			continue // skip ground aircraft
+		}
+		dx := a.X - x
+		dy := a.Y - y
+		dist := math.Sqrt(dx*dx + dy*dy)
+		altSep := math.Abs(a.Altitude - altitude)
+		if dist < minHoriz && altSep < minVert {
+			return false
+		}
 	}
-	if heading >= 360 {
-		heading -= 360
-	}
-
-	altitude := 6000 + rand.Float64()*8000 // 6000–14000 ft
-	speed := 220 + rand.Float64()*80        // 220–300 kts
-
-	a := aircraft.NewAircraft(callsign, typeCode, x, y, altitude, heading, speed)
-	a.IsArrival = true
-	a.Phase = aircraft.PhaseArrival
-	g.Aircraft = append(g.Aircraft, a)
+	return true
 }
 
-// assignSID assigns a random SID exit fix to a departure aircraft
+// assignRoute resolves a route's waypoint names to coordinates and assigns
+// the full route to the aircraft for sequential navigation.
+func (g *Game) assignRoute(a *aircraft.Aircraft, route airport.Route) {
+	var coords [][2]float64
+	var names []string
+	for _, wpName := range route.Waypoints {
+		wp := airport.FindWaypoint(g.Waypoints, wpName)
+		if wp == nil {
+			continue
+		}
+		coords = append(coords, [2]float64{wp.X, wp.Y})
+		names = append(names, wp.Name)
+	}
+	if len(coords) == 0 {
+		return
+	}
+	a.RouteWaypoints = coords
+	a.RouteNames = names
+	a.HasRoute = true
+	a.RouteName = route.Name
+	a.DirectTarget = names[0]
+}
+
+// spawnArrival spawns a new arrival. If STAR routes exist for the current airport,
+// the aircraft is placed near the first STAR waypoint and follows the route.
+// Otherwise it spawns at a random position ~30 nm out.
+func (g *Game) spawnArrival() {
+	typeCode := randomAircraftType()
+	callsign := g.generateCallsign()
+
+	// Collect STAR routes for the current airport
+	var stars []airport.Route
+	for _, r := range g.Routes {
+		if r.Type == "STAR" {
+			stars = append(stars, r)
+		}
+	}
+
+	if len(stars) > 0 {
+		// Shuffle STARs so we try different ones if the first pick is too close
+		shuffled := make([]airport.Route, len(stars))
+		copy(shuffled, stars)
+		rand.Shuffle(len(shuffled), func(i, j int) { shuffled[i], shuffled[j] = shuffled[j], shuffled[i] })
+
+		for _, star := range shuffled {
+			firstWP := airport.FindWaypoint(g.Waypoints, star.Waypoints[0])
+			if firstWP == nil {
+				continue
+			}
+			// Spawn near the first STAR waypoint with a small offset
+			angle := rand.Float64() * 2 * math.Pi
+			offset := 3.0 + rand.Float64()*2.0
+			x := firstWP.X + offset*math.Cos(angle)
+			y := firstWP.Y + offset*math.Sin(angle)
+
+			dist := math.Sqrt(x*x + y*y)
+			altitude := math.Min(14000, math.Max(8000, dist*350))
+
+			if !g.isSafeToSpawn(x, y, altitude) {
+				continue // try another STAR
+			}
+
+			heading := airport.HeadingTo(x, y, firstWP.X, firstWP.Y)
+			speed := 250.0 + rand.Float64()*50
+
+			a := aircraft.NewAircraft(callsign, typeCode, x, y, altitude, heading, speed)
+			a.IsArrival = true
+			a.Phase = aircraft.PhaseArrival
+			g.assignRoute(a, star)
+			g.Aircraft = append(g.Aircraft, a)
+			return
+		}
+		// All STARs too close — skip this spawn cycle
+		return
+	}
+
+	// Fallback: random spawn (no STARs available)
+	g.spawnArrivalRandom(callsign, typeCode)
+}
+
+// spawnArrivalRandom spawns an arrival at a random position ~30 nm from the airport.
+// Retries up to 10 times to find a safe position with enough separation.
+func (g *Game) spawnArrivalRandom(callsign, typeCode string) {
+	for attempt := 0; attempt < 10; attempt++ {
+		angle := rand.Float64() * 360
+		dist := 28.0 + rand.Float64()*7.0
+		angleRad := (90 - angle) * math.Pi / 180
+		x := dist * math.Cos(angleRad)
+		y := dist * math.Sin(angleRad)
+		altitude := 6000 + rand.Float64()*8000
+
+		if !g.isSafeToSpawn(x, y, altitude) {
+			continue
+		}
+
+		toAirport := airport.HeadingTo(x, y, 0, 0)
+		heading := toAirport + (rand.Float64()*40 - 20)
+		if heading < 0 {
+			heading += 360
+		}
+		if heading >= 360 {
+			heading -= 360
+		}
+
+		speed := 220 + rand.Float64()*80
+		a := aircraft.NewAircraft(callsign, typeCode, x, y, altitude, heading, speed)
+		a.IsArrival = true
+		a.Phase = aircraft.PhaseArrival
+		g.Aircraft = append(g.Aircraft, a)
+		return
+	}
+	// All attempts too close — skip this spawn
+}
+
+// assignSID assigns a random SID route to a departure aircraft.
 func (g *Game) assignSID(a *aircraft.Aircraft) {
-	exits := airport.GetSIDExits(g.Airport.ICAO)
-	if len(exits) == 0 {
+	var sids []airport.Route
+	for _, r := range g.Routes {
+		if r.Type == "SID" {
+			sids = append(sids, r)
+		}
+	}
+	if len(sids) == 0 {
 		return
 	}
-	exitName := exits[rand.Intn(len(exits))]
-	wp := airport.FindWaypoint(g.Waypoints, exitName)
-	if wp == nil {
-		return
-	}
-	a.SIDName = exitName
-	a.SIDTargetX = wp.X
-	a.SIDTargetY = wp.Y
-	a.HasSID = true
-	a.DirectTarget = exitName
+	g.assignRoute(a, sids[rand.Intn(len(sids))])
 }
 
 // spawnDeparture spawns a new departure at the active takeoff runway if slots allow
@@ -269,7 +364,7 @@ func (g *Game) spawnDeparture() {
 	}
 	threshX, threshY, takeoffHdg := airport.GetRunwayThreshold(rwy, rwyName)
 
-	typeCode := aircraftTypePool[rand.Intn(len(aircraftTypePool))]
+	typeCode := randomAircraftType()
 	callsign := g.generateCallsign()
 
 	a := aircraft.NewAircraft(callsign, typeCode, threshX, threshY, g.Airport.Elevation, takeoffHdg, 0)
@@ -869,7 +964,7 @@ func (g *Game) handleDirectInput() {
 	}
 	for key, letter := range letterKeys {
 		if g.InputHandler.IsKeyJustPressed(key) {
-			if len(g.CommandInput) < 6 {
+			if len(g.CommandInput) < 10 {
 				g.CommandInput += letter
 			}
 			break
@@ -878,7 +973,7 @@ func (g *Game) handleDirectInput() {
 
 	// Digit keys (0-9)
 	num, pressed := g.InputHandler.GetNumberInput()
-	if pressed && len(g.CommandInput) < 6 {
+	if pressed && len(g.CommandInput) < 10 {
 		g.CommandInput += fmt.Sprintf("%d", num)
 	}
 
@@ -966,14 +1061,17 @@ func (g *Game) drawMenu(screen *ebiten.Image) {
 	ebitenutil.DebugPrintAt(screen, "ATC SIMULATOR", int(panelX)+165, int(panelY)+8)
 
 	// Airport list
-	airports := []struct{ icao, name string }{
-		{"LHBP", "Budapest Ferenc Liszt International"},
-		{"KJFK", "New York John F. Kennedy"},
-		{"KLAX", "Los Angeles International"},
+	type menuEntry struct{ icao, name string }
+	var menuAirports []menuEntry
+	for _, icao := range g.MenuAirports {
+		apt := airport.GetAirport(icao)
+		if apt != nil {
+			menuAirports = append(menuAirports, menuEntry{apt.ICAO, apt.Name})
+		}
 	}
 	listStartY := int(panelY) + 44
 	rowH := 42
-	for i, apt := range airports {
+	for i, apt := range menuAirports {
 		rowY := listStartY + i*rowH
 		// Highlight selected row
 		if i == g.MenuSelection {
@@ -987,7 +1085,7 @@ func (g *Game) drawMenu(screen *ebiten.Image) {
 	}
 
 	// Separator
-	sepY := float32(listStartY+len(airports)*rowH) + 4
+	sepY := float32(listStartY+len(menuAirports)*rowH) + 4
 	vector.StrokeLine(screen, panelX+8, sepY, panelX+panelW-8, sepY, 1, color.RGBA{0, 80, 120, 150}, false)
 
 	// Key hints

@@ -510,7 +510,7 @@ func (r *Renderer) drawAircraft(screen *ebiten.Image, a *aircraft.Aircraft, isSe
 		}
 	}
 
-	// Waypoint connection line — aircraft to its direct-to or SID exit fix
+	// Waypoint connection line — aircraft to its route waypoints or direct-to target
 	// Skip for ground and approach/landing phases (approach cone already covers those)
 	skipPhases := a.Phase == aircraft.PhaseHoldingShort ||
 		a.Phase == aircraft.PhaseLineUpWait ||
@@ -518,36 +518,40 @@ func (r *Renderer) drawAircraft(screen *ebiten.Image, a *aircraft.Aircraft, isSe
 		a.Phase == aircraft.PhaseFinal ||
 		a.Phase == aircraft.PhaseLanding
 	if !skipPhases {
-		var targetX, targetY float64
-		hasTarget := false
-		if a.HasSID {
-			targetX, targetY = a.SIDTargetX, a.SIDTargetY
-			hasTarget = true
+		lineCol := color.RGBA{0, 160, 200, 90} // dim cyan
+		if a.HasRoute && len(a.RouteWaypoints) > 0 {
+			// Draw polyline from aircraft through all remaining route waypoints
+			prevX, prevY := screenX, screenY
+			for _, wp := range a.RouteWaypoints {
+				wx, wy := r.worldToScreen(wp[0], wp[1])
+				r.drawDashedLine(screen, prevX, prevY, wx, wy, lineCol)
+				prevX, prevY = wx, wy
+			}
 		} else if a.DirectTarget != "" {
 			for i := range r.Waypoints {
 				if r.Waypoints[i].Name == a.DirectTarget {
-					targetX, targetY = r.Waypoints[i].X, r.Waypoints[i].Y
-					hasTarget = true
+					tx, ty := r.worldToScreen(r.Waypoints[i].X, r.Waypoints[i].Y)
+					r.drawDashedLine(screen, screenX, screenY, tx, ty, lineCol)
 					break
 				}
-			}
-		}
-		if hasTarget {
-			tx, ty := r.worldToScreen(targetX, targetY)
-			lineCol := color.RGBA{0, 160, 200, 90} // dim cyan
-			for i := 0; i < 3; i++ {
-				t0 := float32(i) / 3.0
-				t1 := t0 + 0.22
-				x0 := screenX + (tx-screenX)*t0
-				y0 := screenY + (ty-screenY)*t0
-				x1 := screenX + (tx-screenX)*t1
-				y1 := screenY + (ty-screenY)*t1
-				vector.StrokeLine(screen, x0, y0, x1, y1, 1, lineCol, false)
 			}
 		}
 	}
 
 	r.drawDataTag(screen, a, screenX, screenY, isSelected)
+}
+
+// drawDashedLine draws a dashed line between two screen points.
+func (r *Renderer) drawDashedLine(screen *ebiten.Image, x0, y0, x1, y1 float32, col color.RGBA) {
+	for i := 0; i < 3; i++ {
+		t0 := float32(i) / 3.0
+		t1 := t0 + 0.22
+		sx := x0 + (x1-x0)*t0
+		sy := y0 + (y1-y0)*t0
+		ex := x0 + (x1-x0)*t1
+		ey := y0 + (y1-y0)*t1
+		vector.StrokeLine(screen, sx, sy, ex, ey, 1, col, false)
+	}
 }
 
 // drawTrail draws the historical position trail as discrete fading dots (authentic ATC style)
@@ -746,10 +750,14 @@ func (r *Renderer) drawDataTag(screen *ebiten.Image, a *aircraft.Aircraft, x, y 
 
 	// Row 3: direct target / SID / heading, with target heading shown when turning
 	row3Y := tagY + 2*lineH
-	if a.DirectTarget != "" {
+	if a.HasRoute && a.RouteName != "" {
+		label := a.RouteName
+		if len(a.RouteNames) > 0 {
+			label += " > " + a.RouteNames[0]
+		}
+		ebitenutil.DebugPrintAt(screen, label, tagX, row3Y)
+	} else if a.DirectTarget != "" {
 		ebitenutil.DebugPrintAt(screen, "> "+a.DirectTarget, tagX, row3Y)
-	} else if a.HasSID {
-		ebitenutil.DebugPrintAt(screen, "SID "+a.SIDName, tagX, row3Y)
 	} else {
 		// "HDG CUR" — append ">TGT" when turning (diff > 2°)
 		curX3 := tagX

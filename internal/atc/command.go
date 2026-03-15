@@ -54,6 +54,10 @@ func IssueHeadingCommand(a *aircraft.Aircraft, heading float64, history *Command
 	if a.Phase == aircraft.PhaseHolding {
 		a.Phase = aircraft.PhaseArrival
 	}
+	// Cancel route following — heading command overrides STAR/SID
+	a.HasRoute = false
+	a.RouteWaypoints = nil
+	a.RouteNames = nil
 	a.CommandHeading(heading)
 	if history != nil {
 		history.AddCommand(Command{

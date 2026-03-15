@@ -58,11 +58,11 @@ type Aircraft struct {
 	HoldLegTimer       float64 // Seconds spent in current leg
 	HoldLegDuration    float64 // Target seconds per leg (based on speed)
 
-	// SID (departure routing)
-	SIDName    string  // Name of assigned SID exit fix (e.g., "MASUN")
-	SIDTargetX float64 // World X of SID exit fix
-	SIDTargetY float64 // World Y of SID exit fix
-	HasSID     bool    // True when a SID exit has been assigned
+	// Route following (STAR/SID — pre-resolved coordinates set by game.go)
+	RouteWaypoints [][2]float64 // Remaining waypoint coordinates to follow
+	RouteNames     []string     // Parallel slice of waypoint names (for display)
+	HasRoute       bool         // True when actively following a route
+	RouteName      string       // Route name for display (e.g., "DERUP1A")
 }
 
 // NewAircraft creates a new aircraft
@@ -305,27 +305,49 @@ func (a *Aircraft) updateAirborne(deltaTime float64) {
 		a.Phase = PhaseDeparture
 	}
 
-	// SID auto-steering: once in PhaseDeparture and not manually commanded,
-	// fly toward the assigned SID exit fix.
-	if a.Phase == PhaseDeparture && a.HasSID && !a.Commanded {
-		dx := a.SIDTargetX - a.X
-		dy := a.SIDTargetY - a.Y
-		dist := math.Sqrt(dx*dx + dy*dy)
-		if dist > 2.0 {
-			hdg := 90 - math.Atan2(dy, dx)*180/math.Pi
-			if hdg < 0 {
-				hdg += 360
-			}
-			if hdg >= 360 {
-				hdg -= 360
-			}
-			a.TargetHeading = hdg
-		} else {
-			// Reached SID exit — clear SID and maintain heading
-			a.HasSID = false
-			a.DirectTarget = ""
-		}
+	// Route auto-steering: follow STAR/SID waypoints when not manually commanded.
+	if a.HasRoute && !a.Commanded {
+		a.advanceRoute()
 	}
+}
+
+// advanceRoute steers toward the next waypoint in RouteWaypoints.
+// When a waypoint is reached (within 2 nm), it is popped and the next one becomes active.
+func (a *Aircraft) advanceRoute() {
+	if len(a.RouteWaypoints) == 0 {
+		a.HasRoute = false
+		a.DirectTarget = ""
+		return
+	}
+
+	targetX := a.RouteWaypoints[0][0]
+	targetY := a.RouteWaypoints[0][1]
+	dx := targetX - a.X
+	dy := targetY - a.Y
+	dist := math.Sqrt(dx*dx + dy*dy)
+
+	if dist < 2.0 {
+		// Reached this waypoint — pop it
+		a.RouteWaypoints = a.RouteWaypoints[1:]
+		a.RouteNames = a.RouteNames[1:]
+		if len(a.RouteWaypoints) == 0 {
+			a.HasRoute = false
+			a.DirectTarget = ""
+			return
+		}
+		a.DirectTarget = a.RouteNames[0]
+		return
+	}
+
+	// Steer toward current waypoint
+	hdg := 90 - math.Atan2(dy, dx)*180/math.Pi
+	if hdg < 0 {
+		hdg += 360
+	}
+	if hdg >= 360 {
+		hdg -= 360
+	}
+	a.TargetHeading = hdg
 }
 
 // getTurnDirection returns -1 for left turn, 1 for right turn (shortest path)

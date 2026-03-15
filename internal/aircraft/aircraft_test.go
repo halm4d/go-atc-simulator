@@ -5,6 +5,20 @@ import (
 	"testing"
 )
 
+func init() {
+	// Register a minimal B738 type for tests so they don't depend on the data loader.
+	if len(AircraftTypes) == 0 {
+		RegisterTypes([]Type{
+			{
+				ICAO: "B738", Name: "Boeing 737-800",
+				CruiseSpeed: 450, MaxSpeed: 490, MinSpeed: 140,
+				MaxAltitude: 41000, ClimbRate: 2000, DescentRate: 2500,
+				TurnRate: 3.0, WakeTurbulence: "M", Category: "JET",
+			},
+		})
+	}
+}
+
 // ---- turn direction ----
 
 func TestGetTurnDirection_Right(t *testing.T) {
@@ -188,6 +202,78 @@ func TestEnterHold_StartsOutbound(t *testing.T) {
 	a.EnterHold()
 	if a.HoldLeg != 1 {
 		t.Errorf("expected HoldLeg=1 (outbound) at entry, got %d", a.HoldLeg)
+	}
+}
+
+// ---- route following ----
+
+func TestAdvanceRoute_SteersTowardWaypoint(t *testing.T) {
+	a := NewAircraft("T1", "B738", 0, 0, 10000, 0, 250)
+	a.Phase = PhaseArrival
+	a.RouteWaypoints = [][2]float64{{10, 0}, {20, 0}}
+	a.RouteNames = []string{"WP1", "WP2"}
+	a.HasRoute = true
+	a.RouteName = "STAR1"
+	a.DirectTarget = "WP1"
+
+	a.advanceRoute()
+
+	// Aircraft at (0,0), waypoint at (10,0) → heading should be ~090
+	if a.TargetHeading < 85 || a.TargetHeading > 95 {
+		t.Errorf("expected heading ~090 toward waypoint, got %.1f", a.TargetHeading)
+	}
+}
+
+func TestAdvanceRoute_PopsWaypointWhenReached(t *testing.T) {
+	a := NewAircraft("T1", "B738", 9.5, 0, 10000, 90, 250)
+	a.Phase = PhaseArrival
+	a.RouteWaypoints = [][2]float64{{10, 0}, {20, 0}}
+	a.RouteNames = []string{"WP1", "WP2"}
+	a.HasRoute = true
+
+	a.advanceRoute()
+
+	if len(a.RouteWaypoints) != 1 {
+		t.Fatalf("expected 1 waypoint remaining, got %d", len(a.RouteWaypoints))
+	}
+	if a.RouteNames[0] != "WP2" {
+		t.Errorf("expected next waypoint WP2, got %s", a.RouteNames[0])
+	}
+	if a.DirectTarget != "WP2" {
+		t.Errorf("expected DirectTarget WP2, got %s", a.DirectTarget)
+	}
+}
+
+func TestAdvanceRoute_ClearsRouteWhenComplete(t *testing.T) {
+	a := NewAircraft("T1", "B738", 9.5, 0, 10000, 90, 250)
+	a.Phase = PhaseArrival
+	a.RouteWaypoints = [][2]float64{{10, 0}}
+	a.RouteNames = []string{"WP1"}
+	a.HasRoute = true
+
+	a.advanceRoute()
+
+	if a.HasRoute {
+		t.Error("expected HasRoute to be false after reaching last waypoint")
+	}
+	if a.DirectTarget != "" {
+		t.Errorf("expected empty DirectTarget, got %s", a.DirectTarget)
+	}
+}
+
+func TestAdvanceRoute_SkippedWhenCommanded(t *testing.T) {
+	a := NewAircraft("T1", "B738", 0, 0, 10000, 0, 250)
+	a.Phase = PhaseArrival
+	a.RouteWaypoints = [][2]float64{{10, 0}}
+	a.RouteNames = []string{"WP1"}
+	a.HasRoute = true
+	a.Commanded = true
+
+	origHeading := a.TargetHeading
+	a.Update(1.0) // should NOT call advanceRoute because Commanded=true
+
+	if a.TargetHeading != origHeading {
+		t.Errorf("expected heading unchanged when Commanded, got %.1f", a.TargetHeading)
 	}
 }
 

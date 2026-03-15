@@ -1,0 +1,60 @@
+{
+  "icao": "LHBP",
+  "iata": "BUD",
+  "name": "Budapest Ferenc Liszt International Airport",
+  "latitude": 47.4398,
+  "longitude": 19.2618,
+  "elevation": 495,
+  "defaultLandingRunway": "13R",
+  "defaultTakeoffRunway": "13L",
+  "runways": [
+    {
+      "name1": "13R",
+      "name2": "31L",
+      "heading1": 131,
+      "heading2": 311,
+      "length": 10827,
+      "width": 148
+    },
+    {
+      "name1": "13L",
+      "name2": "31R",
+      "heading1": 131,
+      "heading2": 311,
+      "length": 9843,
+      "width": 148
+    }
+  ],
+  "waypoints": [
+    {"name": "DERUP", "x": -30, "y": 25, "type": "STAR"},
+    {"name": "GERSA", "x": -20, "y": 18, "type": "STAR"},
+    {"name": "OLBEN", "x": -12, "y": 12, "type": "IAF"},
+    {"name": "ODINA", "x": 30, "y": 15, "type": "STAR"},
+    {"name": "NEMKI", "x": 22, "y": 10, "type": "STAR"},
+    {"name": "OSPEN", "x": 15, "y": 8, "type": "IAF"},
+    {"name": "RUSIK", "x": 15, "y": -28, "type": "STAR"},
+    {"name": "VOSUD", "x": 10, "y": -18, "type": "STAR"},
+    {"name": "LUNIP", "x": 8, "y": -12, "type": "IAF"},
+    {"name": "RIPMO", "x": -28, "y": -12, "type": "STAR"},
+    {"name": "NEPOD", "x": -20, "y": -8, "type": "STAR"},
+    {"name": "PEPOK", "x": -12, "y": -6, "type": "IAF"},
+    {"name": "BP502", "x": -8, "y": 5, "type": "IF"},
+    {"name": "BP503", "x": 5, "y": 3, "type": "IF"},
+    {"name": "BP513", "x": -4, "y": 2, "type": "FAF"},
+    {"name": "BP514", "x": 3, "y": 1, "type": "FAF"},
+    {"name": "MASUN", "x": -25, "y": 28, "type": "SID"},
+    {"name": "RUDNO", "x": 28, "y": 22, "type": "SID"},
+    {"name": "KEKEC", "x": -20, "y": -28, "type": "SID"},
+    {"name": "BEREK", "x": 25, "y": -28, "type": "SID"}
+  ],
+  "routes": [
+    {"name": "DERUP1A", "type": "STAR", "waypoints": ["DERUP", "GERSA", "OLBEN", "BP502", "BP513"], "runway": "13R"},
+    {"name": "ODINA1A", "type": "STAR", "waypoints": ["ODINA", "NEMKI", "OSPEN", "BP503", "BP514"], "runway": "13L"},
+    {"name": "RUSIK1A", "type": "STAR", "waypoints": ["RUSIK", "VOSUD", "LUNIP", "BP503", "BP514"], "runway": "13L"},
+    {"name": "RIPMO1A", "type": "STAR", "waypoints": ["RIPMO", "NEPOD", "PEPOK", "BP502", "BP513"], "runway": "13R"},
+    {"name": "MASUN1A", "type": "SID", "waypoints": ["MASUN"], "runway": "13R"},
+    {"name": "RUDNO1A", "type": "SID", "waypoints": ["RUDNO"], "runway": "13R"},
+    {"name": "KEKEC1A", "type": "SID", "waypoints": ["KEKEC"], "runway": "13L"},
+    {"name": "BEREK1A", "type": "SID", "waypoints": ["BEREK"], "runway": "13L"}
+  ]
+}
