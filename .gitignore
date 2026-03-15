@@ -7,7 +7,6 @@
 *.out
 *.bin
 *.wasm
-!docs/game.wasm
 
 # Build output
 /build/
