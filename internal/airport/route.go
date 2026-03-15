@@ -1,5 +1,7 @@
 package airport
 
+import "strings"
+
 // Route represents an approach or departure route
 type Route struct {
 	Name      string   `json:"name"`
@@ -19,6 +21,16 @@ func RegisterRoutes(icao string, r []Route) {
 // GetRoutes returns routes for a given airport
 func GetRoutes(icao string) []Route {
 	return routes[icao]
+}
+
+// FindRoute searches for a route by name (case-insensitive).
+func FindRoute(routes []Route, name string) *Route {
+	for i, r := range routes {
+		if strings.EqualFold(r.Name, name) {
+			return &routes[i]
+		}
+	}
+	return nil
 }
 
 // GetSIDExits returns the SID exit waypoint names for a given airport,

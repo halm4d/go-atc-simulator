@@ -279,12 +279,12 @@ func TestAdvanceRoute_SkippedWhenCommanded(t *testing.T) {
 
 // ---- data tag ----
 
-func TestRotateDataTag_Cycles(t *testing.T) {
+func TestResetDataTag(t *testing.T) {
 	a := NewAircraft("T1", "B738", 0, 0, 10000, 0, 250)
-	for i := 0; i < 4; i++ {
-		a.RotateDataTag()
-	}
-	if a.DataTagPos != 0 {
-		t.Errorf("DataTagPos should wrap back to 0 after 4 rotations, got %d", a.DataTagPos)
+	a.DataTagOffX = 100
+	a.DataTagOffY = 200
+	a.ResetDataTag()
+	if a.DataTagOffX != 15 || a.DataTagOffY != -42 {
+		t.Errorf("expected default offset (15,-42), got (%d,%d)", a.DataTagOffX, a.DataTagOffY)
 	}
 }

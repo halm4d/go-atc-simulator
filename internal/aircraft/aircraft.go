@@ -48,7 +48,8 @@ type Aircraft struct {
 	AirportElevation float64 // Airport elevation in feet
 	ThresholdX       float64 // Runway threshold X position (nm from airport center)
 	ThresholdY       float64 // Runway threshold Y position (nm from airport center)
-	DataTagPos       int     // 0=top-right, 1=top-left, 2=bottom-left, 3=bottom-right
+	DataTagOffX      int     // Tag X offset from aircraft screen position
+	DataTagOffY      int     // Tag Y offset from aircraft screen position
 	Trail      [][2]float64 // Recent position samples for trail rendering
 	TrailTimer float64      // Accumulator for trail sampling interval
 
@@ -86,7 +87,8 @@ func NewAircraft(callsign string, typeCode string, x, y, altitude, heading, spee
 		TargetSpeed:    speed,
 		Phase:          PhaseArrival, // default; departure spawning overrides this
 		Selected:       false,
-		DataTagPos:     0, // Default top-right
+		DataTagOffX:    15,  // Default top-right
+		DataTagOffY:    -42,
 	}
 }
 
@@ -420,7 +422,8 @@ func (a *Aircraft) AltitudeSeparation(other *Aircraft) float64 {
 	return math.Abs(a.Altitude - other.Altitude)
 }
 
-// RotateDataTag cycles the data tag position clockwise
-func (a *Aircraft) RotateDataTag() {
-	a.DataTagPos = (a.DataTagPos + 1) % 4
+// ResetDataTag resets the data tag offset to the default top-right position.
+func (a *Aircraft) ResetDataTag() {
+	a.DataTagOffX = 15
+	a.DataTagOffY = -42
 }

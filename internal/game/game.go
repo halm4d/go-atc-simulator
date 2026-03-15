@@ -10,6 +10,7 @@ import (
 	"image/color"
 	"math"
 	"math/rand"
+	"strings"
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
@@ -39,6 +40,7 @@ type Game struct {
 	CommandInput        string // Accumulates numeric input
 	ActiveLandingRunway string // Runway used for ILS capture and approach cone
 	ActiveTakeoffRunway string // Runway used by departures
+	ShowHelp            bool   // Help overlay visible
 
 	// Spawning & difficulty
 	SpawnTimer       float64 // Time since last arrival spawn
@@ -284,7 +286,6 @@ func (g *Game) spawnArrival() {
 			a := aircraft.NewAircraft(callsign, typeCode, x, y, altitude, heading, speed)
 			a.IsArrival = true
 			a.Phase = aircraft.PhaseArrival
-			g.assignRoute(a, star)
 			g.Aircraft = append(g.Aircraft, a)
 			return
 		}
@@ -427,6 +428,62 @@ func (g *Game) handleMenuInput() {
 	}
 	if g.InputHandler.IsKeyJustPressed(ebiten.KeyEnter) || g.InputHandler.IsKeyJustPressed(ebiten.KeySpace) {
 		g.startGame(g.MenuAirports[g.MenuSelection])
+	}
+
+	// Mouse click on airport rows
+	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+		mx, my := g.InputHandler.MouseX, g.InputHandler.MouseY
+		sw := float32(g.Renderer.ScreenWidth)
+		sh := float32(g.Renderer.ScreenHeight)
+		panelW := float32(460)
+		panelX := sw/2 - panelW/2
+		panelY := sh/2 - float32(240)/2
+		listStartY := int(panelY) + 44
+		rowH := 42
+
+		for i := range g.MenuAirports {
+			rowY := listStartY + i*rowH
+			if mx >= int(panelX)+4 && mx <= int(panelX+panelW)-4 &&
+				my >= rowY-2 && my < rowY+rowH-4 {
+				if g.MenuSelection == i {
+					// Click on already-selected row starts the game
+					g.startGame(g.MenuAirports[g.MenuSelection])
+				} else {
+					g.MenuSelection = i
+				}
+				break
+			}
+		}
+	}
+}
+
+// checkAutoDescend lowers arrival aircraft to 3000ft AGL when aligned with
+// the runway approach heading and within 15nm of the threshold.
+func (g *Game) checkAutoDescend() {
+	for _, a := range g.Aircraft {
+		if a.Phase != aircraft.PhaseArrival || a.RunwayName == "" {
+			continue
+		}
+		dx := a.X - a.ThresholdX
+		dy := a.Y - a.ThresholdY
+		dist := math.Sqrt(dx*dx + dy*dy)
+		if dist > 15 {
+			continue
+		}
+
+		// Must be heading roughly toward the runway
+		hdgDiff := math.Abs(a.Heading - a.RunwayHeading)
+		if hdgDiff > 180 {
+			hdgDiff = 360 - hdgDiff
+		}
+		if hdgDiff > 30 {
+			continue
+		}
+
+		targetAlt := g.Airport.Elevation + 3000
+		if a.TargetAltitude > targetAlt {
+			a.TargetAltitude = targetAlt
+		}
 	}
 }
 
@@ -596,6 +653,9 @@ func (g *Game) Update() error {
 		g.WindSpeed = math.Max(2, math.Min(35, g.WindSpeed))
 	}
 
+	// Auto-descend arrivals approaching the runway
+	g.checkAutoDescend()
+
 	// Auto-capture aircraft onto ILS when aligned with a runway
 	g.checkILSCapture()
 
@@ -698,6 +758,18 @@ func (g *Game) handleZoom() {
 
 // handleInput processes user input
 func (g *Game) handleInput() {
+	// Toggle help overlay
+	if g.InputHandler.IsKeyJustPressed(ebiten.KeyF1) {
+		g.ShowHelp = !g.ShowHelp
+		return
+	}
+	if g.ShowHelp {
+		if g.InputHandler.IsKeyJustPressed(ebiten.KeyEscape) {
+			g.ShowHelp = false
+		}
+		return
+	}
+
 	// Handle textbox dragging
 	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
 		// Check if clicking textbox title bar to start dragging
@@ -715,6 +787,100 @@ func (g *Game) handleInput() {
 	// Stop dragging
 	if g.CommandTextBox.IsDragging && !ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
 		g.CommandTextBox.StopDrag()
+	}
+
+	// Label/tag dragging: waypoint labels, runway labels, and aircraft data tags
+	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) && g.Renderer.DraggingLabel == "" && g.Renderer.DraggingAircraft == nil {
+		mx, my := g.InputHandler.MouseX, g.InputHandler.MouseY
+
+		// Check data tags first (highest priority — drawn on top)
+		for _, a := range g.Aircraft {
+			sx, sy := g.Renderer.WorldToScreen(a.X, a.Y)
+			x1, y1, x2, y2 := g.Renderer.GetDataTagBounds(a, float32(sx), float32(sy))
+			if mx >= x1 && mx <= x2 && my >= y1 && my <= y2 {
+				g.Renderer.DraggingAircraft = a
+				g.Renderer.DragOffsetX = mx - (int(sx) + a.DataTagOffX)
+				g.Renderer.DragOffsetY = my - (int(sy) + a.DataTagOffY)
+				if g.SelectedAircraft == a {
+					// Already selected — activate field for scroll-to-change
+					field := g.Renderer.GetDataTagFieldAt(a,
+						float32(sx), float32(sy),
+						float32(mx), float32(my))
+					if field != "" {
+						g.ActiveField = field
+						g.ActiveAircraft = a
+					} else {
+						g.ActiveField = ""
+						g.ActiveAircraft = nil
+					}
+				} else {
+					// Select the aircraft whose tag was clicked
+					if g.SelectedAircraft != nil {
+						g.SelectedAircraft.Selected = false
+					}
+					g.SelectedAircraft = a
+					g.SelectedAircraft.Selected = true
+					g.CommandMode = ""
+					g.CommandInput = ""
+					g.ActiveField = ""
+					g.ActiveAircraft = nil
+				}
+				return
+			}
+		}
+
+		// Check waypoint and runway labels
+		hit := g.Renderer.GetLabelAt(mx, my)
+		if hit != "" {
+			rect := g.Renderer.LabelRects[hit]
+			g.Renderer.DraggingLabel = hit
+			g.Renderer.DragOffsetX = mx - rect.X
+			g.Renderer.DragOffsetY = my - rect.Y
+			return
+		}
+	}
+	// Update data tag drag
+	if g.Renderer.DraggingAircraft != nil {
+		if ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
+			a := g.Renderer.DraggingAircraft
+			sx, sy := g.Renderer.WorldToScreen(a.X, a.Y)
+			a.DataTagOffX = g.InputHandler.MouseX - g.Renderer.DragOffsetX - int(sx)
+			a.DataTagOffY = g.InputHandler.MouseY - g.Renderer.DragOffsetY - int(sy)
+		} else {
+			g.Renderer.DraggingAircraft = nil
+		}
+		return
+	}
+	// Update label drag (waypoints and runways)
+	if g.Renderer.DraggingLabel != "" {
+		if ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
+			lx := g.InputHandler.MouseX - g.Renderer.DragOffsetX
+			ly := g.InputHandler.MouseY - g.Renderer.DragOffsetY
+			key := g.Renderer.DraggingLabel
+
+			if strings.HasPrefix(key, "rwy:") {
+				// Runway label — find threshold screen position
+				rwyName := strings.TrimPrefix(key, "rwy:")
+				rwy, ok := g.Airport.FindRunwayByName(rwyName)
+				if ok {
+					tx, ty, _ := airport.GetRunwayThreshold(rwy, rwyName)
+					sx, sy := g.Renderer.WorldToScreen(tx, ty)
+					g.Renderer.RunwayLabelOffsets[rwyName] = [2]int{lx - int(sx), ly - int(sy)}
+				}
+			} else {
+				// Waypoint label
+				for _, wp := range g.Waypoints {
+					if wp.Name == key {
+						sx, sy := g.Renderer.WorldToScreen(wp.X, wp.Y)
+						g.Renderer.WaypointLabelOffsets[wp.Name] = [2]int{lx - int(sx), ly - int(sy)}
+						break
+					}
+				}
+			}
+		} else {
+			g.Renderer.DraggingLabel = ""
+		}
+		return
 	}
 
 	// ESC to deselect and clear any active field
@@ -749,7 +915,7 @@ func (g *Game) handleInput() {
 					g.ActiveAircraft = clicked
 				} else {
 					// Row 1 or missed — rotate the tag
-					clicked.RotateDataTag()
+					// drag to reposition
 					g.ActiveField = ""
 					g.ActiveAircraft = nil
 				}
@@ -768,24 +934,33 @@ func (g *Game) handleInput() {
 		}
 	}
 
-	// Right-click on data tag → rotate tag position
+	// Right-click on label/tag → reset position
 	// Right-click near airport → open runway config menu
 	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonRight) {
 		mx, my := g.InputHandler.MouseX, g.InputHandler.MouseY
 
-		// Check data tags first (higher priority than airport)
+		// Check data tags — right-click resets to default position
 		for _, a := range g.Aircraft {
 			sx, sy := g.Renderer.WorldToScreen(a.X, a.Y)
 			x1, y1, x2, y2 := g.Renderer.GetDataTagBounds(a, float32(sx), float32(sy))
 			if mx >= x1 && mx <= x2 && my >= y1 && my <= y2 {
-				a.RotateDataTag()
-				// Clear active field if it was on this aircraft
+				a.ResetDataTag()
 				if g.ActiveAircraft == a {
 					g.ActiveField = ""
 					g.ActiveAircraft = nil
 				}
 				return
 			}
+		}
+
+		// Check waypoint/runway labels — right-click resets to auto-placement
+		if hit := g.Renderer.GetLabelAt(mx, my); hit != "" {
+			if strings.HasPrefix(hit, "rwy:") {
+				delete(g.Renderer.RunwayLabelOffsets, strings.TrimPrefix(hit, "rwy:"))
+			} else {
+				delete(g.Renderer.WaypointLabelOffsets, hit)
+			}
+			return
 		}
 
 		// Airport runway menu
@@ -931,7 +1106,25 @@ func (g *Game) executeCommand() {
 			atc.IssueSpeedCommand(g.SelectedAircraft, value, g.CommandHistory, g.SimTime)
 		}
 	case "DIRECT":
-		// Try waypoint first
+		// Try STAR/SID route first
+		route := airport.FindRoute(g.Routes, g.CommandInput)
+		if route != nil {
+			g.assignRoute(g.SelectedAircraft, *route)
+			g.SelectedAircraft.Commanded = false // let route auto-steer
+			if route.Runway != "" {
+				rwy, ok := g.Airport.FindRunwayByName(route.Runway)
+				if ok {
+					threshX, threshY, hdg := airport.GetRunwayThreshold(rwy, route.Runway)
+					g.SelectedAircraft.RunwayName = route.Runway
+					g.SelectedAircraft.RunwayHeading = hdg
+					g.SelectedAircraft.ThresholdX = threshX
+					g.SelectedAircraft.ThresholdY = threshY
+					g.SelectedAircraft.AirportElevation = g.Airport.Elevation
+				}
+			}
+			break
+		}
+		// Try waypoint
 		wp := airport.FindWaypoint(g.Waypoints, g.CommandInput)
 		if wp != nil {
 			heading := airport.HeadingTo(g.SelectedAircraft.X, g.SelectedAircraft.Y, wp.X, wp.Y)
@@ -1038,6 +1231,94 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	// Draw runway config menu (on top of everything)
 	g.RunwayMenu.Draw(screen, g.ActiveLandingRunway, g.ActiveTakeoffRunway)
 
+	// Draw help overlay (topmost layer)
+	if g.ShowHelp {
+		g.drawHelp(screen)
+	}
+}
+
+// drawHelp renders the help overlay on top of the game
+func (g *Game) drawHelp(screen *ebiten.Image) {
+	sw := float32(g.Renderer.ScreenWidth)
+	sh := float32(g.Renderer.ScreenHeight)
+
+	// Dim background
+	vector.DrawFilledRect(screen, 0, 0, sw, sh, color.RGBA{0, 0, 0, 160}, false)
+
+	// Centered panel
+	panelW := float32(540)
+	panelH := float32(610)
+	px := sw/2 - panelW/2
+	py := sh/2 - panelH/2
+	vector.DrawFilledRect(screen, px, py, panelW, panelH, color.RGBA{0, 12, 24, 245}, false)
+	vector.StrokeRect(screen, px, py, panelW, panelH, 2, color.RGBA{0, 200, 255, 220}, false)
+
+	// Title bar
+	vector.DrawFilledRect(screen, px, py, panelW, 22, color.RGBA{0, 80, 130, 220}, false)
+	ebitenutil.DebugPrintAt(screen, "ATC SIMULATOR - HELP", int(px)+panelW2(panelW, "ATC SIMULATOR - HELP"), int(py)+5)
+
+	// Content
+	x := int(px) + 20
+	y := int(py) + 32
+	line := func(text string) {
+		ebitenutil.DebugPrintAt(screen, text, x, y)
+		y += 16
+	}
+
+	line("GOAL")
+	line("  Guide arrivals to land and departures out of your")
+	line("  sector. Score points for each successful landing")
+	line("  (+50) and departure exit (+25).")
+	y += 6
+
+	line("SEPARATION")
+	line("  Warning:  <5nm horizontal AND <1000ft vertical")
+	line("  Critical: <3nm horizontal AND <500ft vertical (-2pts)")
+	y += 6
+
+	line("SELECTING AIRCRAFT")
+	line("  Left-click an aircraft symbol or its data tag.")
+	line("  Click a field on a selected tag, then scroll the")
+	line("  mouse wheel to adjust (HDG/ALT/SPD).")
+	y += 6
+
+	line("COMMANDS (select aircraft first)")
+	line("  H - Heading   (enter 000-359, press Enter)")
+	line("  A - Altitude  (enter in 100s, e.g. 50 = 5000ft)")
+	line("  S - Speed     (enter knots, press Enter)")
+	line("  D - Direct to (waypoint, runway, STAR or SID name)")
+	line("  W - Hold      (enter holding pattern)")
+	y += 6
+
+	line("LANDING SEQUENCE")
+	line("  1. Direct arrival to a STAR or vector toward runway")
+	line("  2. Aircraft auto-descends within 15nm when aligned")
+	line("  3. ILS captures automatically (within 15nm, <30 off)")
+	line("  4. Press C to clear for landing once on ILS")
+	y += 6
+
+	line("TAKEOFF SEQUENCE")
+	line("  1. Press L to line up and wait")
+	line("  2. Press T to clear for takeoff")
+	line("  3. Aircraft follows assigned SID automatically")
+	y += 6
+
+	line("OTHER CONTROLS")
+	line("  Right-click near airport  - runway configuration")
+	line("  Right-click label/tag     - reset position")
+	line("  Mouse wheel               - zoom in/out")
+	line("  ESC                       - deselect / close menus")
+
+	// Footer
+	footerY := int(py+panelH) - 20
+	vector.StrokeLine(screen, px+10, float32(footerY-4), px+panelW-10, float32(footerY-4), 1, color.RGBA{0, 200, 255, 80}, false)
+	ebitenutil.DebugPrintAt(screen, "Press F1 or ESC to close", int(px)+panelW2(panelW, "Press F1 or ESC to close"), footerY)
+}
+
+// panelW2 returns the X offset to center text in a panel of given width
+func panelW2(panelW float32, text string) int {
+	textW := len(text) * 6
+	return (int(panelW) - textW) / 2
 }
 
 // drawMenu renders the airport selector screen
@@ -1089,7 +1370,7 @@ func (g *Game) drawMenu(screen *ebiten.Image) {
 	vector.StrokeLine(screen, panelX+8, sepY, panelX+panelW-8, sepY, 1, color.RGBA{0, 80, 120, 150}, false)
 
 	// Key hints
-	ebitenutil.DebugPrintAt(screen, "Up/Down or W/S to select  |  Enter or Space to start", int(panelX)+20, int(sepY)+8)
+	ebitenutil.DebugPrintAt(screen, "Click or Up/Down to select  |  Double-click or Enter to start", int(panelX)+8, int(sepY)+8)
 }
 
 // Layout updates the renderer to match the actual window size each frame,

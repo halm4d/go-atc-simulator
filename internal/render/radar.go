@@ -37,6 +37,9 @@ var (
 	ColorUI             = color.RGBA{200, 200, 200, 255} // UI elements
 )
 
+// labelRect tracks a placed label's bounding box for overlap avoidance.
+type labelRect struct{ X, Y, W, H int }
+
 // Renderer handles all radar display rendering
 type Renderer struct {
 	ScreenWidth         int
@@ -65,17 +68,32 @@ type Renderer struct {
 
 	// Waypoint list — populated each frame in Draw(), used by drawAircraft()
 	Waypoints []airport.Waypoint
+
+	// placedLabels accumulates label bounding rects across draw calls within a frame.
+	placedLabels []labelRect
+
+	// Draggable labels — waypoints and runway labels
+	WaypointLabelOffsets map[string][2]int    // waypoint name → (dx, dy) from marker
+	RunwayLabelOffsets   map[string][2]int    // runway name → (dx, dy) from threshold
+	LabelRects           map[string]labelRect // all draggable label rects (for hit-testing)
+	DraggingLabel        string               // label key being dragged, "" if none
+	DraggingAircraft     *aircraft.Aircraft   // aircraft whose data tag is being dragged
+	DragOffsetX          int                  // mouse offset from label origin at drag start
+	DragOffsetY          int
 }
 
 // NewRenderer creates a new renderer
 func NewRenderer(width, height int, scale float64) *Renderer {
 	return &Renderer{
-		ScreenWidth:  width,
-		ScreenHeight: height,
-		Scale:        scale,
-		MinScale:     2.0,  // Zoomed out - 2 pixels per nm
-		MaxScale:     60.0, // Zoomed in - 60 pixels per nm
-		CenterX:      0,
+		ScreenWidth:          width,
+		ScreenHeight:         height,
+		Scale:                scale,
+		MinScale:             2.0,  // Zoomed out - 2 pixels per nm
+		MaxScale:             60.0, // Zoomed in - 60 pixels per nm
+		WaypointLabelOffsets: make(map[string][2]int),
+		RunwayLabelOffsets:   make(map[string][2]int),
+		LabelRects:           make(map[string]labelRect),
+		CenterX:              0,
 		CenterY:      0,
 	}
 }
@@ -122,6 +140,12 @@ func (r *Renderer) Draw(screen *ebiten.Image, airportData *airport.Airport, wayp
 		}
 	}
 
+	// Reset label collision tracking for this frame
+	r.placedLabels = r.placedLabels[:0]
+	for k := range r.LabelRects {
+		delete(r.LabelRects, k)
+	}
+
 	// Fill background
 	screen.Fill(ColorBackground)
 
@@ -134,11 +158,11 @@ func (r *Renderer) Draw(screen *ebiten.Image, airportData *airport.Airport, wayp
 	// Draw routes (STAR paths)
 	r.drawRoutes(screen, routes, waypoints)
 
-	// Draw waypoints
-	r.drawWaypoints(screen, waypoints)
-
-	// Draw airport and runways
+	// Draw airport and runways (before waypoints so runway labels are registered first)
 	r.drawAirport(screen, airportData)
+
+	// Draw waypoints (uses r.placedLabels to avoid runway/airport label overlap)
+	r.drawWaypoints(screen, waypoints)
 
 	// Draw approach cone for active landing runway
 	if r.ActiveLandingRunway != "" {
@@ -200,6 +224,16 @@ func (r *Renderer) drawRoutes(screen *ebiten.Image, routes []airport.Route, wayp
 			continue
 		}
 
+		// Pick color based on route type
+		var routeColor, labelColor color.RGBA
+		if route.Type == "SID" {
+			routeColor = color.RGBA{50, 90, 60, 130}
+			labelColor = color.RGBA{70, 130, 80, 200}
+		} else {
+			routeColor = color.RGBA{50, 60, 110, 130}
+			labelColor = color.RGBA{70, 80, 150, 200}
+		}
+
 		// Draw lines connecting waypoints
 		for i := 0; i < len(route.Waypoints)-1; i++ {
 			wp1Name := route.Waypoints[i]
@@ -215,12 +249,59 @@ func (r *Renderer) drawRoutes(screen *ebiten.Image, routes []airport.Route, wayp
 			x1, y1 := r.worldToScreen(wp1.X, wp1.Y)
 			x2, y2 := r.worldToScreen(wp2.X, wp2.Y)
 
-			vector.StrokeLine(screen, x1, y1, x2, y2, 1, color.RGBA{50, 60, 90, 130}, false)
+			vector.StrokeLine(screen, x1, y1, x2, y2, 1, routeColor, false)
 		}
+
+		// Draw route name at the entry waypoint (first for STARs, last for SIDs)
+		entryIdx := 0
+		if route.Type == "SID" {
+			entryIdx = len(route.Waypoints) - 1
+		}
+		entryWP, ok := wpMap[route.Waypoints[entryIdx]]
+		if !ok {
+			continue
+		}
+		ex, ey := r.worldToScreen(entryWP.X, entryWP.Y)
+
+		// Offset label along the route direction (away from airport)
+		charW := 6
+		charH := 12
+		lw := len(route.Name) * charW
+		lh := charH
+		lx, ly := int(ex)-lw/2, int(ey)-lh-8
+
+		// Avoid overlapping already-placed labels
+		offsets := [][2]int{
+			{-lw / 2, -lh - 8},  // above
+			{-lw / 2, 10},       // below
+			{10, -lh / 2},       // right
+			{-lw - 6, -lh / 2},  // left
+		}
+		for _, off := range offsets {
+			cx, cy := int(ex)+off[0], int(ey)+off[1]
+			overlap := false
+			for _, p := range r.placedLabels {
+				if cx < p.X+p.W && cx+lw > p.X && cy < p.Y+p.H && cy+lh > p.Y {
+					overlap = true
+					break
+				}
+			}
+			if !overlap {
+				lx, ly = cx, cy
+				break
+			}
+		}
+
+		ebitenutil.DebugPrintAt(screen, route.Name, lx, ly)
+		r.placedLabels = append(r.placedLabels, labelRect{lx, ly, lw, lh})
+
+		// Draw a small leader line from label to entry waypoint
+		vector.StrokeLine(screen, float32(lx+lw/2), float32(ly+lh), ex, ey, 1, labelColor, false)
 	}
 }
 
-// drawWaypoints draws waypoint markers
+// drawWaypoints draws waypoint markers with non-overlapping, draggable labels.
+// Uses r.placedLabels to avoid runway and airport labels already registered.
 func (r *Renderer) drawWaypoints(screen *ebiten.Image, waypoints []airport.Waypoint) {
 	for _, wp := range waypoints {
 		screenX, screenY := r.worldToScreen(wp.X, wp.Y)
@@ -232,9 +313,67 @@ func (r *Renderer) drawWaypoints(screen *ebiten.Image, waypoints []airport.Waypo
 		vector.StrokeLine(screen, screenX+size, screenY+size, screenX, screenY-size, 1, wpCol, false)
 		vector.StrokeLine(screen, screenX, screenY-size, screenX-size, screenY+size, 1, wpCol, false)
 
-		// Draw name
-		ebitenutil.DebugPrintAt(screen, wp.Name, int(screenX)+8, int(screenY)-8)
+		charW := 6
+		charH := 12
+		lw := len(wp.Name) * charW
+		lh := charH
+		sx, sy := int(screenX), int(screenY)
+
+		var lx, ly int
+
+		if customOff, ok := r.WaypointLabelOffsets[wp.Name]; ok {
+			// User has manually positioned this label
+			lx, ly = sx+customOff[0], sy+customOff[1]
+		} else {
+			// Auto-place: pick first non-overlapping candidate
+			offsets := [][2]int{
+				{8, -lh},              // top-right (default)
+				{8, 4},                // bottom-right
+				{-lw - 4, -lh},       // top-left
+				{-lw - 4, 4},         // bottom-left
+				{-lw/2 + 4, -lh - 6}, // centered above
+				{-lw/2 + 4, lh},      // centered below
+			}
+
+			bestOff := offsets[0]
+			for _, off := range offsets {
+				rx, ry := sx+off[0], sy+off[1]
+				overlaps := false
+				for _, p := range r.placedLabels {
+					if rx < p.X+p.W && rx+lw > p.X && ry < p.Y+p.H && ry+lh > p.Y {
+						overlaps = true
+						break
+					}
+				}
+				if !overlaps {
+					bestOff = off
+					break
+				}
+			}
+			lx, ly = sx+bestOff[0], sy+bestOff[1]
+		}
+
+		// Draw leader line from marker to label
+		if r.WaypointLabelOffsets[wp.Name] != ([2]int{}) {
+			vector.StrokeLine(screen, screenX, screenY, float32(lx), float32(ly+lh/2), 1, color.RGBA{0, 160, 200, 60}, false)
+		}
+
+		ebitenutil.DebugPrintAt(screen, wp.Name, lx, ly)
+		rect := labelRect{lx, ly, lw, lh}
+		r.placedLabels = append(r.placedLabels, rect)
+		r.LabelRects[wp.Name] = rect
 	}
+}
+
+// GetLabelAt returns the key of the label at (mx, my), or "".
+// Keys are waypoint names (e.g. "DERUP") or "rwy:13R" for runway labels.
+func (r *Renderer) GetLabelAt(mx, my int) string {
+	for key, rect := range r.LabelRects {
+		if mx >= rect.X && mx <= rect.X+rect.W && my >= rect.Y && my <= rect.Y+rect.H {
+			return key
+		}
+	}
+	return ""
 }
 
 // drawAirport draws the airport and runways
@@ -259,6 +398,7 @@ func (r *Renderer) drawAirport(screen *ebiten.Image, airport *airport.Airport) {
 	labelY := int(centerY) - 25
 	vector.DrawFilledRect(screen, float32(labelX-2), float32(labelY-2), 50, 14, ColorBackground, false)
 	ebitenutil.DebugPrintAt(screen, label, labelX, labelY)
+	r.placedLabels = append(r.placedLabels, labelRect{labelX - 2, labelY - 2, 54, 18})
 }
 
 // drawRunway draws a single runway
@@ -369,13 +509,26 @@ func (r *Renderer) drawApproachCone(screen *ebiten.Image, apt *airport.Airport, 
 	ebitenutil.DebugPrintAt(screen, "ILS "+runwayName, int(lx)-12, int(ly)-8)
 }
 
-// drawRunwayLabel draws a runway number with background box
+// drawRunwayLabel draws a runway number with background box (draggable)
 func (r *Renderer) drawRunwayLabel(screen *ebiten.Image, label string, x, y int, col color.RGBA) {
-	// Draw background box
 	boxWidth := float32(len(label) * 8)
 	boxHeight := float32(12)
-	boxX := float32(x) - boxWidth/2
-	boxY := float32(y) - 20
+
+	// Default offset: centered above the threshold
+	defaultOffX := int(-boxWidth / 2)
+	defaultOffY := -20
+	offX, offY := defaultOffX, defaultOffY
+	if custom, ok := r.RunwayLabelOffsets[label]; ok {
+		offX, offY = custom[0], custom[1]
+	}
+
+	boxX := float32(x + offX)
+	boxY := float32(y + offY)
+
+	// Leader line if manually repositioned
+	if _, ok := r.RunwayLabelOffsets[label]; ok {
+		vector.StrokeLine(screen, float32(x), float32(y), boxX+boxWidth/2, boxY+boxHeight/2, 1, color.RGBA{180, 180, 180, 60}, false)
+	}
 
 	// Dark background with border
 	vector.DrawFilledRect(screen, boxX-2, boxY-2, boxWidth+4, boxHeight+4, ColorBackground, false)
@@ -383,6 +536,12 @@ func (r *Renderer) drawRunwayLabel(screen *ebiten.Image, label string, x, y int,
 
 	// Draw text
 	ebitenutil.DebugPrintAt(screen, label, int(boxX), int(boxY))
+
+	// Register for overlap avoidance and hit-testing
+	key := "rwy:" + label
+	rect := labelRect{int(boxX) - 2, int(boxY) - 2, int(boxWidth) + 4, int(boxHeight) + 4}
+	r.placedLabels = append(r.placedLabels, rect)
+	r.LabelRects[key] = rect
 }
 
 // drawApproachLine draws a dashed line from the aircraft to the runway threshold
@@ -642,23 +801,9 @@ func drawTrendArrow(screen *ebiten.Image, x, y int, trend int) {
 func (r *Renderer) drawDataTag(screen *ebiten.Image, a *aircraft.Aircraft, x, y float32, isSelected bool) {
 	col := aircraftColor(a, isSelected)
 
-	// Calculate tag position based on DataTagPos
-	// 0=top-right, 1=top-left, 2=bottom-left, 3=bottom-right
-	var tagX, tagY int
-	switch a.DataTagPos {
-	case 0: // top-right
-		tagX = int(x) + 15
-		tagY = int(y) - 42
-	case 1: // top-left
-		tagX = int(x) - 80
-		tagY = int(y) - 42
-	case 2: // bottom-left
-		tagX = int(x) - 80
-		tagY = int(y) + 10
-	case 3: // bottom-right
-		tagX = int(x) + 15
-		tagY = int(y) + 10
-	}
+	// Calculate tag position from free-form offset
+	tagX := int(x) + a.DataTagOffX
+	tagY := int(y) + a.DataTagOffY
 
 	// Draw tag line (leader line from aircraft to tag)
 	vector.StrokeLine(screen, x, y, float32(tagX), float32(tagY+5), 1, col, false)
@@ -777,22 +922,8 @@ func (r *Renderer) drawDataTag(screen *ebiten.Image, a *aircraft.Aircraft, x, y 
 
 // GetDataTagBounds returns the bounding box of a data tag for click detection
 func (r *Renderer) GetDataTagBounds(a *aircraft.Aircraft, x, y float32) (int, int, int, int) {
-	var tagX, tagY int
-	switch a.DataTagPos {
-	case 0: // top-right
-		tagX = int(x) + 15
-		tagY = int(y) - 42
-	case 1: // top-left
-		tagX = int(x) - 80
-		tagY = int(y) - 42
-	case 2: // bottom-left
-		tagX = int(x) - 80
-		tagY = int(y) + 10
-	case 3: // bottom-right
-		tagX = int(x) + 15
-		tagY = int(y) + 10
-	}
-
+	tagX := int(x) + a.DataTagOffX
+	tagY := int(y) + a.DataTagOffY
 	// 3 rows × ~13 px each ≈ 38 px tall, 110 px wide (wider for alt/spd targets)
 	return tagX, tagY, tagX + 110, tagY + 38
 }
@@ -930,21 +1061,8 @@ func (r *Renderer) drawNorthIndicator(screen *ebiten.Image) {
 // screen point (sx, sy), given the aircraft's screen-space position (ax, ay).
 // Returns "" if the point is outside the tag or on row 1.
 func (r *Renderer) GetDataTagFieldAt(a *aircraft.Aircraft, ax, ay, sx, sy float32) string {
-	var tagX, tagY int
-	switch a.DataTagPos {
-	case 0:
-		tagX = int(ax) + 15
-		tagY = int(ay) - 42
-	case 1:
-		tagX = int(ax) - 80
-		tagY = int(ay) - 42
-	case 2:
-		tagX = int(ax) - 80
-		tagY = int(ay) + 10
-	case 3:
-		tagX = int(ax) + 15
-		tagY = int(ay) + 10
-	}
+	tagX := int(ax) + a.DataTagOffX
+	tagY := int(ay) + a.DataTagOffY
 
 	// Horizontal bounds
 	if sx < float32(tagX-3) || sx > float32(tagX+133) {
