@@ -5,14 +5,18 @@ A realistic Air Traffic Control simulator built in Go with Ebiten, featuring rea
 ## Features
 
 - **Realistic ATC Radar Display**: Minimalist dark theme inspired by real ATC software
-- **Real Airports**: JFK (KJFK), LAX (KLAX), and Budapest (LHBP) with accurate runway layouts
-- **STAR Approach Maps**: Budapest features realistic Standard Terminal Arrival Routes with waypoints
-- **Approach Routes Visualization**: Color-coded STAR paths displayed on radar
+- **Real Airports**: Budapest (LHBP) with accurate runway layouts
+- **STAR/SID Routes**: Standard Terminal Arrival Routes and Standard Instrument Departures with waypoints
+- **Drag-to-Waypoint**: Click and drag an aircraft to a waypoint or route label to issue commands instantly
+- **Flight Strip Panel**: Toggleable side panel showing aircraft list, details, and available commands
 - **Real Aircraft Types**: 10 common aircraft types (B738, A320, B77W, A359, etc.) with realistic performance
-- **Physics-Based Movement**: Aircraft follow realistic flight dynamics
+- **Physics-Based Movement**: Aircraft follow realistic flight dynamics with wind effects
 - **Separation Monitoring**: Enforces standard 5nm horizontal / 1000ft vertical separation
-- **Command System**: Issue heading, altitude, speed, and direct-to-waypoint commands to aircraft
-- **Zoom Functionality**: Mouse wheel zoom from 2-20 pixels per nautical mile
+- **Command System**: Issue heading, altitude, speed, direct-to-waypoint, and holding commands
+- **Holding Patterns**: Right-hand racetrack holding patterns
+- **ILS Capture**: Automatic ILS establishment when aircraft are aligned with the runway
+- **Runway Configuration**: Right-click near the airport to configure active landing/takeoff runways
+- **Zoom & Pan**: Mouse wheel zoom from 2-60 pixels per nautical mile
 
 ## Quick Start
 
@@ -43,39 +47,56 @@ Then open your browser to `http://localhost:8080`
 
 ## Controls
 
-- **Click** on aircraft or datatag to select (turns yellow)
-- **Click datatag multiple times** to rotate position (top-right → top-left → bottom-left → bottom-right)
-- **Drag command textbox** by clicking and dragging the title bar to move it anywhere on screen
-- **Mouse Wheel** - Zoom in/out (2-20 pixels per nautical mile)
+### Mouse
+- **Click** on aircraft symbol or datatag to select (turns yellow)
+- **Drag aircraft symbol** to a waypoint or route label to issue a direct-to or route assignment command
+- **Drag datatag** to reposition it; right-click to reset
+- **Drag waypoint/runway labels** to reposition; right-click to reset
+- **Right-click near airport** to open runway configuration menu
+- **Mouse Wheel** - Zoom in/out (over radar), scroll aircraft list (over flight strip panel), or adjust selected field value (when a datatag field is active)
+
+### Keyboard
 - **H** - Issue heading command (0-359 degrees)
 - **A** - Issue altitude command (in hundreds of feet, e.g., 100 = 10,000 ft)
 - **S** - Issue speed command (knots)
-- **D** - Issue direct-to command (type waypoint name: TORAZ, CATUZ, ATICO, NICRA, etc.)
+- **D** - Issue direct-to command (type waypoint name)
+- **W** - Enter holding pattern
+- **L** - Line up and wait (ground aircraft)
+- **T** - Takeoff clearance (ground aircraft)
+- **C** - Cleared to land (aircraft on final approach)
+- **Tab** - Toggle flight strip panel
+- **F1** - Toggle help overlay
 - **Numbers/Letters** - Enter command value
 - **ENTER** - Confirm command
 - **ESC** - Deselect aircraft or cancel command
 
 ## How to Play
 
-1. Aircraft will spawn around the airport as arrivals and departures
-2. Select an aircraft by clicking on it
-3. Issue commands to maintain safe separation
-4. Keep aircraft at least 5nm apart horizontally OR 1000ft apart vertically
-5. Score decreases with separation violations
+1. Select an airport from the menu and start the game
+2. Aircraft spawn as arrivals (following STARs) and departures (queued at the runway)
+3. Select an aircraft by clicking on it, then issue commands via keyboard or drag it to a waypoint/route
+4. Guide arrivals onto the ILS approach and clear them to land
+5. Clear departures for takeoff and let them follow their SID
+6. Maintain at least 5nm horizontal OR 1000ft vertical separation between aircraft
+7. Score increases with successful landings (+50) and departures (+25), decreases with separation violations
 
 ## Display
 
-- **Green triangles**: Aircraft (pointing in their heading direction)
+- **Green triangles**: Commanded arrival aircraft
+- **White triangles**: Uncommanded arrival aircraft
+- **Sky blue triangles**: Departure aircraft
 - **Yellow triangles**: Selected aircraft
-- **Semi-transparent lines behind aircraft**: Heading indicators (15nm trail showing direction of travel)
-- **Data tags**: Show callsign, aircraft type, altitude (hundreds of feet), speed (rotatable by clicking)
-- **Radial lines from center**: Compass headings every 30° (cardinal directions N/E/S/W are brighter)
-- **Heading labels**: 000, 030, 060... 330 marked around the radar
-- **Cyan triangles**: IAF waypoints (Initial Approach Fixes like TORAZ, CATUZ, ATICO, NICRA)
+- **Amber symbols**: Ground/holding aircraft
+- **Orange**: Aircraft on final approach awaiting landing clearance
+- **Data tags**: Callsign, type, altitude, speed, heading/route with trend arrows
+- **Cyan triangles**: Waypoints (STAR/SID/IAF/FAF fixes)
+- **Blue/purple lines**: STAR and SID route paths with labels
 - **White circle with crosshair**: Airport location
 - **Bright gray lines**: Runways with numbers
-- **Orange/Red lines**: Separation conflicts (orange = warning, red = critical)
+- **Orange/Red pulsing circles**: Separation conflicts (orange = warning, red = critical)
 - **Concentric circles**: Range rings every 10 nautical miles
+- **Position trails**: Fading blue dots showing recent aircraft path
+- **Flight strip panel** (right side): Aircraft list sorted by priority with detail view
 
 ## Aircraft Types
 
@@ -104,15 +125,24 @@ atc-sim/
 │   │   ├── types.go                 # Aircraft type definitions
 │   │   └── aircraft.go              # Aircraft entity and physics
 │   ├── airport/
-│   │   └── airport.go               # Airport and runway data
+│   │   ├── airport.go               # Airport and runway data
+│   │   ├── waypoint.go              # Waypoint lookup and math
+│   │   └── route.go                 # STAR/SID route definitions
 │   ├── atc/
 │   │   ├── command.go               # ATC command system
 │   │   └── separation.go            # Separation monitoring
+│   ├── data/
+│   │   ├── loader.go                # JSON data loading
+│   │   └── airports/
+│   │       └── LHBP.json            # Budapest airport data
 │   ├── game/
-│   │   ├── game.go                  # Main game loop
+│   │   ├── game.go                  # Main game loop and state
 │   │   └── input.go                 # Input handling
 │   └── render/
-│       └── radar.go                 # Radar display rendering
+│       ├── radar.go                 # Radar display rendering
+│       ├── flightstrip.go           # Flight strip panel UI
+│       ├── textbox.go               # Command textbox UI
+│       └── runwaymenu.go            # Runway configuration menu
 ├── web/
 │   ├── index.html                   # WASM loader page
 │   ├── game.wasm                    # (generated)
@@ -123,13 +153,10 @@ atc-sim/
 
 ## Future Enhancements
 
-- Additional airports (LAX, EGLL, etc.)
-- More complex scenarios
+- Additional airports (KJFK, KLAX, EGLL, etc.)
 - Weather conditions
 - Voice commands (text-to-speech)
 - Multiplayer mode
-- Flight strips
-- STAR/SID procedures
 - Mobile app version
 
 ## Requirements
