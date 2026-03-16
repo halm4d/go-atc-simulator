@@ -1,6 +1,26 @@
 # ATC Simulator
 
+[![Go](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go&logoColor=white)](https://go.dev/)
+[![Ebiten](https://img.shields.io/badge/Ebiten-2.x-4B8BBE)](https://ebitengine.org/)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS%20%7C%20Web-lightgrey)]()
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![GitHub Pages](https://img.shields.io/badge/demo-Play%20Online-blue)](https://halm4d.github.io/go-atc-simulator/)
+
 A realistic Air Traffic Control simulator built in Go with Ebiten, featuring real airports and aircraft types.
+
+## Table of Contents
+
+- [Features](#features)
+- [Quick Start](#quick-start)
+- [Controls](#controls)
+- [How to Play](#how-to-play)
+- [Display](#display)
+- [Aircraft Types](#aircraft-types)
+- [Project Structure](#project-structure)
+- [Future Enhancements](#future-enhancements)
+- [Requirements](#requirements)
+- [License](#license)
+- [Contributing](#contributing)
 
 ## Features
 
