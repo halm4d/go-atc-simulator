@@ -32,6 +32,7 @@ type Game struct {
 	Conflicts        []atc.Conflict
 	CommandTextBox   *render.CommandTextBox
 	RunwayMenu       *render.RunwayMenu
+	FlightStripPanel *render.FlightStripPanel
 
 	SimTime             float64
 	LastUpdate          time.Time
@@ -65,6 +66,11 @@ type Game struct {
 	// Active data-tag field for scroll-to-change interaction
 	ActiveField    string             // "ALTITUDE", "SPEED", "HEADING", or ""
 	ActiveAircraft *aircraft.Aircraft // aircraft whose field is active
+
+	// Drag aircraft symbol to waypoint/route
+	SymbolDragCandidate *aircraft.Aircraft // set on mousedown over aircraft symbol
+	SymbolDragStartX    int
+	SymbolDragStartY    int
 }
 
 // NewGame creates a new game instance starting at the airport selector menu
@@ -94,6 +100,7 @@ func (g *Game) startGame(icao string) {
 	g.CommandHistory = atc.NewCommandHistory(20)
 	g.CommandTextBox = render.NewCommandTextBox(g.Renderer.ScreenWidth-330, 50, 300, 200)
 	g.RunwayMenu = render.NewRunwayMenu()
+	g.FlightStripPanel = render.NewFlightStripPanel(g.Renderer.ScreenWidth, g.Renderer.ScreenHeight)
 	g.SimTime = 0
 	g.LastUpdate = time.Now()
 	g.Score = 100
@@ -239,6 +246,10 @@ func (g *Game) assignRoute(a *aircraft.Aircraft, route airport.Route) {
 	a.HasRoute = true
 	a.RouteName = route.Name
 	a.DirectTarget = names[0]
+	// Preserve original assignment (only set once — first SID/STAR assigned at spawn)
+	if a.AssignedRoute == "" {
+		a.AssignedRoute = route.Name
+	}
 }
 
 // spawnArrival spawns a new arrival. If STAR routes exist for the current airport,
@@ -712,6 +723,14 @@ func (g *Game) handleZoom() {
 		return
 	}
 
+	// If mouse is over the flight strip panel, scroll the panel instead of zooming
+	if g.FlightStripPanel != nil && g.FlightStripPanel.Visible {
+		if g.FlightStripPanel.IsMouseInPanel(g.InputHandler.MouseX, g.InputHandler.MouseY) {
+			g.FlightStripPanel.HandleScroll(wheelY, len(g.Aircraft), g.SelectedAircraft != nil)
+			return
+		}
+	}
+
 	// If a data-tag field is active and the aircraft is commandable, scroll changes the field.
 	if g.ActiveField != "" && g.ActiveAircraft != nil && g.ActiveAircraft.IsCommandable() {
 		a := g.ActiveAircraft
@@ -758,6 +777,14 @@ func (g *Game) handleZoom() {
 
 // handleInput processes user input
 func (g *Game) handleInput() {
+	// Toggle flight strip panel
+	if g.InputHandler.IsKeyJustPressed(ebiten.KeyTab) {
+		if g.FlightStripPanel != nil {
+			g.FlightStripPanel.Visible = !g.FlightStripPanel.Visible
+		}
+		return
+	}
+
 	// Toggle help overlay
 	if g.InputHandler.IsKeyJustPressed(ebiten.KeyF1) {
 		g.ShowHelp = !g.ShowHelp
@@ -768,6 +795,35 @@ func (g *Game) handleInput() {
 			g.ShowHelp = false
 		}
 		return
+	}
+
+	// Handle flight strip panel clicks
+	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) && g.FlightStripPanel != nil && g.FlightStripPanel.Visible {
+		if g.FlightStripPanel.IsMouseInPanel(g.InputHandler.MouseX, g.InputHandler.MouseY) {
+			clicked := g.FlightStripPanel.HandleClick(g.InputHandler.MouseX, g.InputHandler.MouseY, g.Aircraft, g.SelectedAircraft)
+			if clicked != nil {
+				// Deselect old
+				if g.SelectedAircraft != nil {
+					g.SelectedAircraft.Selected = false
+				}
+				// Select new (or toggle off if same)
+				if g.SelectedAircraft == clicked {
+					g.SelectedAircraft = nil
+					g.CommandMode = ""
+					g.CommandInput = ""
+					g.ActiveField = ""
+					g.ActiveAircraft = nil
+				} else {
+					clicked.Selected = true
+					g.SelectedAircraft = clicked
+					g.CommandMode = ""
+					g.CommandInput = ""
+					g.ActiveField = ""
+					g.ActiveAircraft = nil
+				}
+			}
+			return
+		}
 	}
 
 	// Handle textbox dragging
@@ -883,6 +939,78 @@ func (g *Game) handleInput() {
 		return
 	}
 
+	// Drag-to-waypoint: threshold check (each frame while mouse held)
+	if g.SymbolDragCandidate != nil && ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
+		dx := g.InputHandler.MouseX - g.SymbolDragStartX
+		dy := g.InputHandler.MouseY - g.SymbolDragStartY
+		if !g.Renderer.DragToWPActive && (dx*dx+dy*dy) > 25 { // 5px threshold
+			g.Renderer.DraggingToWP = g.SymbolDragCandidate
+			g.Renderer.DragToWPActive = true
+			// Select the aircraft being dragged
+			if g.SelectedAircraft != nil {
+				g.SelectedAircraft.Selected = false
+			}
+			g.SelectedAircraft = g.SymbolDragCandidate
+			g.SelectedAircraft.Selected = true
+			g.CommandMode = ""
+			g.CommandInput = ""
+		}
+	}
+
+	// Drag-to-waypoint: track drop target each frame
+	if g.Renderer.DragToWPActive && g.Renderer.DraggingToWP != nil {
+		mx, my := g.InputHandler.MouseX, g.InputHandler.MouseY
+		g.Renderer.DropTarget = ""
+		if routeName := g.Renderer.GetRouteLabelAt(mx, my); routeName != "" {
+			g.Renderer.DropTarget = "route:" + routeName
+		} else if wpName := g.Renderer.GetLabelAt(mx, my); wpName != "" && !strings.HasPrefix(wpName, "rwy:") {
+			g.Renderer.DropTarget = wpName
+		} else if wpName := g.Renderer.GetWaypointNear(mx, my, 15, g.Waypoints); wpName != "" {
+			g.Renderer.DropTarget = wpName
+		}
+	}
+
+	// Drag-to-waypoint: release (mouse-up)
+	if g.SymbolDragCandidate != nil && !ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
+		if g.Renderer.DragToWPActive && g.Renderer.DraggingToWP != nil {
+			a := g.Renderer.DraggingToWP
+			target := g.Renderer.DropTarget
+			if strings.HasPrefix(target, "route:") {
+				routeName := strings.TrimPrefix(target, "route:")
+				route := airport.FindRoute(g.Routes, routeName)
+				if route != nil {
+					g.assignRoute(a, *route)
+					a.Commanded = false
+				}
+			} else if target != "" {
+				wp := airport.FindWaypoint(g.Waypoints, target)
+				if wp != nil {
+					heading := airport.HeadingTo(a.X, a.Y, wp.X, wp.Y)
+					atc.IssueHeadingCommand(a, heading, g.CommandHistory, g.SimTime)
+					a.DirectTarget = target
+				}
+			}
+		} else {
+			// No drag occurred — perform normal click-to-select
+			a := g.SymbolDragCandidate
+			if g.SelectedAircraft != nil {
+				g.SelectedAircraft.Selected = false
+			}
+			g.SelectedAircraft = a
+			a.Selected = true
+			g.CommandMode = ""
+			g.CommandInput = ""
+			g.ActiveField = ""
+			g.ActiveAircraft = nil
+		}
+		// Reset drag state
+		g.SymbolDragCandidate = nil
+		g.Renderer.DraggingToWP = nil
+		g.Renderer.DragToWPActive = false
+		g.Renderer.DropTarget = ""
+		return
+	}
+
 	// ESC to deselect and clear any active field
 	if g.InputHandler.IsKeyJustPressed(ebiten.KeyEscape) {
 		g.SelectedAircraft = nil
@@ -890,10 +1018,15 @@ func (g *Game) handleInput() {
 		g.CommandInput = ""
 		g.ActiveField = ""
 		g.ActiveAircraft = nil
+		// Also cancel any in-progress drag
+		g.SymbolDragCandidate = nil
+		g.Renderer.DraggingToWP = nil
+		g.Renderer.DragToWPActive = false
+		g.Renderer.DropTarget = ""
 		return
 	}
 
-	// Mouse click to select aircraft (only if not clicking in textbox)
+	// Mouse click to select aircraft or start drag-to-waypoint (only if not clicking in textbox)
 	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
 		// Don't select aircraft if clicking inside the textbox
 		if g.CommandTextBox.IsMouseInTextBox(g.InputHandler.MouseX, g.InputHandler.MouseY) {
@@ -903,24 +1036,38 @@ func (g *Game) handleInput() {
 		worldX, worldY := g.Renderer.ScreenToWorld(g.InputHandler.MouseX, g.InputHandler.MouseY)
 		clicked, isDataTagClick := g.InputHandler.HandleMouseClick(g.Aircraft, worldX, worldY, g.Renderer)
 		if clicked != nil {
-			if isDataTagClick && clicked == g.SelectedAircraft {
-				// Second click on already-selected aircraft's data tag:
-				// try to activate a specific field for scroll-to-change.
-				sx, sy := g.Renderer.WorldToScreen(clicked.X, clicked.Y)
-				field := g.Renderer.GetDataTagFieldAt(clicked,
-					float32(sx), float32(sy),
-					float32(g.InputHandler.MouseX), float32(g.InputHandler.MouseY))
-				if field != "" {
-					g.ActiveField = field
-					g.ActiveAircraft = clicked
+			if isDataTagClick {
+				// Datatag click — handle selection/field activation (no drag-to-waypoint)
+				if clicked == g.SelectedAircraft {
+					sx, sy := g.Renderer.WorldToScreen(clicked.X, clicked.Y)
+					field := g.Renderer.GetDataTagFieldAt(clicked,
+						float32(sx), float32(sy),
+						float32(g.InputHandler.MouseX), float32(g.InputHandler.MouseY))
+					if field != "" {
+						g.ActiveField = field
+						g.ActiveAircraft = clicked
+					} else {
+						g.ActiveField = ""
+						g.ActiveAircraft = nil
+					}
 				} else {
-					// Row 1 or missed — rotate the tag
-					// drag to reposition
+					if g.SelectedAircraft != nil {
+						g.SelectedAircraft.Selected = false
+					}
+					g.SelectedAircraft = clicked
+					g.SelectedAircraft.Selected = true
+					g.CommandMode = ""
+					g.CommandInput = ""
 					g.ActiveField = ""
 					g.ActiveAircraft = nil
 				}
+			} else if clicked.IsCommandable() {
+				// Symbol click on commandable aircraft — defer selection, start drag candidate
+				g.SymbolDragCandidate = clicked
+				g.SymbolDragStartX = g.InputHandler.MouseX
+				g.SymbolDragStartY = g.InputHandler.MouseY
 			} else {
-				// Select a new (or different) aircraft — clear any active field
+				// Symbol click on non-commandable aircraft — just select
 				if g.SelectedAircraft != nil {
 					g.SelectedAircraft.Selected = false
 				}
@@ -1200,8 +1347,24 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	g.Renderer.WindSpeed = g.WindSpeed
 	g.Renderer.ActiveField = g.ActiveField
 	g.Renderer.ActiveAircraft = g.ActiveAircraft
+	g.Renderer.MouseX = g.InputHandler.MouseX
+	g.Renderer.MouseY = g.InputHandler.MouseY
+
+	// Set radar offset based on panel visibility
+	if g.FlightStripPanel != nil && g.FlightStripPanel.Visible {
+		g.Renderer.RadarOffsetX = -140 // half of panel width (280/2)
+		g.FlightStripPanel.UpdateLayout(g.Renderer.ScreenWidth, g.Renderer.ScreenHeight)
+	} else {
+		g.Renderer.RadarOffsetX = 0
+	}
 
 	g.Renderer.Draw(screen, g.Airport, g.Waypoints, g.Routes, g.Aircraft, g.Conflicts, g.SelectedAircraft, g.SimTime)
+
+	// Draw flight strip panel
+	if g.FlightStripPanel != nil && g.FlightStripPanel.Visible {
+		g.FlightStripPanel.Draw(screen, g.Aircraft, g.SelectedAircraft,
+			g.Renderer.ConflictMap, g.CommandMode, g.CommandInput)
+	}
 
 	if g.GameOver {
 		sw := float32(g.Renderer.ScreenWidth)
@@ -1225,8 +1388,10 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		return
 	}
 
-	// Draw command textbox
-	g.CommandTextBox.Draw(screen, g.CommandMode, g.CommandInput, g.SelectedAircraft)
+	// Draw command textbox (hidden when flight strip panel is visible)
+	if g.FlightStripPanel == nil || !g.FlightStripPanel.Visible {
+		g.CommandTextBox.Draw(screen, g.CommandMode, g.CommandInput, g.SelectedAircraft)
+	}
 
 	// Draw runway config menu (on top of everything)
 	g.RunwayMenu.Draw(screen, g.ActiveLandingRunway, g.ActiveTakeoffRunway)
@@ -1307,6 +1472,7 @@ func (g *Game) drawHelp(screen *ebiten.Image) {
 	line("  Right-click near airport  - runway configuration")
 	line("  Right-click label/tag     - reset position")
 	line("  Mouse wheel               - zoom in/out")
+	line("  Tab                       - toggle flight strip panel")
 	line("  ESC                       - deselect / close menus")
 
 	// Footer

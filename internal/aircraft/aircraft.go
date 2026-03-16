@@ -64,6 +64,7 @@ type Aircraft struct {
 	RouteNames     []string     // Parallel slice of waypoint names (for display)
 	HasRoute       bool         // True when actively following a route
 	RouteName      string       // Route name for display (e.g., "DERUP1A")
+	AssignedRoute  string       // Originally assigned STAR/SID name (never cleared)
 }
 
 // NewAircraft creates a new aircraft

@@ -49,6 +49,7 @@ type Renderer struct {
 	MaxScale            float64 // Maximum zoom (zoomed in)
 	CenterX             float64 // Center X in nm
 	CenterY             float64 // Center Y in nm
+	RadarOffsetX        int     // Horizontal pixel offset for radar center (negative = shift left)
 	ActiveLandingRunway string  // Runway designation used for approach cone
 	ActiveTakeoffRunway string
 
@@ -76,10 +77,17 @@ type Renderer struct {
 	WaypointLabelOffsets map[string][2]int    // waypoint name → (dx, dy) from marker
 	RunwayLabelOffsets   map[string][2]int    // runway name → (dx, dy) from threshold
 	LabelRects           map[string]labelRect // all draggable label rects (for hit-testing)
+	RouteLabelRects      map[string]labelRect // route name → bounding rect (for drop-target hit-testing)
 	DraggingLabel        string               // label key being dragged, "" if none
 	DraggingAircraft     *aircraft.Aircraft   // aircraft whose data tag is being dragged
 	DragOffsetX          int                  // mouse offset from label origin at drag start
 	DragOffsetY          int
+
+	// Drag-to-waypoint state
+	DraggingToWP   *aircraft.Aircraft // aircraft being dragged to a waypoint/route
+	DragToWPActive bool               // true once drag threshold exceeded
+	DropTarget     string             // highlighted drop target ("", "DERUP", "route:STAR1A")
+	MouseX, MouseY int                // current mouse position (set before Draw)
 }
 
 // NewRenderer creates a new renderer
@@ -93,6 +101,7 @@ func NewRenderer(width, height int, scale float64) *Renderer {
 		WaypointLabelOffsets: make(map[string][2]int),
 		RunwayLabelOffsets:   make(map[string][2]int),
 		LabelRects:           make(map[string]labelRect),
+		RouteLabelRects:      make(map[string]labelRect),
 		CenterX:              0,
 		CenterY:      0,
 	}
@@ -145,6 +154,9 @@ func (r *Renderer) Draw(screen *ebiten.Image, airportData *airport.Airport, wayp
 	for k := range r.LabelRects {
 		delete(r.LabelRects, k)
 	}
+	for k := range r.RouteLabelRects {
+		delete(r.RouteLabelRects, k)
+	}
 
 	// Fill background
 	screen.Fill(ColorBackground)
@@ -189,13 +201,16 @@ func (r *Renderer) Draw(screen *ebiten.Image, airportData *airport.Airport, wayp
 		r.drawAircraft(screen, a, a == selectedAircraft)
 	}
 
+	// Draw drag-to-waypoint visual feedback
+	r.DrawDragToWaypoint(screen, waypoints)
+
 	// Draw UI overlay
 	r.drawUI(screen, airportData, len(aircraftList), len(conflicts), simTime)
 }
 
 // drawRangeRings draws distance rings from center
 func (r *Renderer) drawRangeRings(screen *ebiten.Image) {
-	centerX := float32(r.ScreenWidth / 2)
+	centerX := float32(r.radarCenterX())
 	centerY := float32(r.ScreenHeight / 2)
 
 	// Draw rings every 10nm
@@ -293,7 +308,9 @@ func (r *Renderer) drawRoutes(screen *ebiten.Image, routes []airport.Route, wayp
 		}
 
 		ebitenutil.DebugPrintAt(screen, route.Name, lx, ly)
-		r.placedLabels = append(r.placedLabels, labelRect{lx, ly, lw, lh})
+		routeRect := labelRect{lx, ly, lw, lh}
+		r.placedLabels = append(r.placedLabels, routeRect)
+		r.RouteLabelRects[route.Name] = routeRect
 
 		// Draw a small leader line from label to entry waypoint
 		vector.StrokeLine(screen, float32(lx+lw/2), float32(ly+lh), ex, ey, 1, labelColor, false)
@@ -376,9 +393,72 @@ func (r *Renderer) GetLabelAt(mx, my int) string {
 	return ""
 }
 
+// GetRouteLabelAt returns the route name whose label contains (mx, my), or "".
+func (r *Renderer) GetRouteLabelAt(mx, my int) string {
+	for name, rect := range r.RouteLabelRects {
+		if mx >= rect.X && mx <= rect.X+rect.W && my >= rect.Y && my <= rect.Y+rect.H {
+			return name
+		}
+	}
+	return ""
+}
+
+// GetWaypointNear returns the waypoint name nearest to (mx, my) within radiusPx, or "".
+func (r *Renderer) GetWaypointNear(mx, my int, radiusPx float64, waypoints []airport.Waypoint) string {
+	bestDist := radiusPx
+	bestName := ""
+	for _, wp := range waypoints {
+		sx, sy := r.worldToScreen(wp.X, wp.Y)
+		dx := float64(mx) - float64(sx)
+		dy := float64(my) - float64(sy)
+		dist := math.Sqrt(dx*dx + dy*dy)
+		if dist < bestDist {
+			bestDist = dist
+			bestName = wp.Name
+		}
+	}
+	return bestName
+}
+
+// DrawDragToWaypoint renders the drag-to-waypoint visual feedback.
+func (r *Renderer) DrawDragToWaypoint(screen *ebiten.Image, waypoints []airport.Waypoint) {
+	if !r.DragToWPActive || r.DraggingToWP == nil {
+		return
+	}
+	a := r.DraggingToWP
+	ax, ay := r.worldToScreen(a.X, a.Y)
+
+	// Draw line from aircraft to cursor
+	lineCol := color.RGBA{255, 255, 0, 180}
+	vector.StrokeLine(screen, ax, ay, float32(r.MouseX), float32(r.MouseY), 2, lineCol, false)
+
+	// Highlight drop target
+	if r.DropTarget != "" {
+		highlightCol := color.RGBA{0, 255, 200, 200}
+		if len(r.DropTarget) > 6 && r.DropTarget[:6] == "route:" {
+			routeName := r.DropTarget[6:]
+			if rect, ok := r.RouteLabelRects[routeName]; ok {
+				vector.StrokeRect(screen, float32(rect.X-2), float32(rect.Y-2),
+					float32(rect.W+4), float32(rect.H+4), 2, highlightCol, false)
+			}
+		} else {
+			// Waypoint highlight: ring around the waypoint marker
+			for _, wp := range waypoints {
+				if wp.Name == r.DropTarget {
+					sx, sy := r.worldToScreen(wp.X, wp.Y)
+					vector.StrokeCircle(screen, sx, sy, 12, 2, highlightCol, false)
+					// Draw name prominently near the ring
+					ebitenutil.DebugPrintAt(screen, wp.Name, int(sx)+14, int(sy)-6)
+					break
+				}
+			}
+		}
+	}
+}
+
 // drawAirport draws the airport and runways
 func (r *Renderer) drawAirport(screen *ebiten.Image, airport *airport.Airport) {
-	centerX := float32(r.ScreenWidth / 2)
+	centerX := float32(r.radarCenterX())
 	centerY := float32(r.ScreenHeight / 2)
 
 	// Draw runways first (behind airport symbol)
@@ -567,8 +647,8 @@ func (r *Renderer) drawApproachLine(screen *ebiten.Image, a *aircraft.Aircraft) 
 	}
 }
 
-// aircraftColor returns the appropriate color for an aircraft based on its phase and state.
-func aircraftColor(a *aircraft.Aircraft, isSelected bool) color.RGBA {
+// AircraftColor returns the appropriate color for an aircraft based on its phase and state.
+func AircraftColor(a *aircraft.Aircraft, isSelected bool) color.RGBA {
 	if isSelected {
 		return ColorSelected
 	}
@@ -604,7 +684,7 @@ func (r *Renderer) drawAircraft(screen *ebiten.Image, a *aircraft.Aircraft, isSe
 
 	screenX, screenY := r.worldToScreen(a.X, a.Y)
 
-	col := aircraftColor(a, isSelected)
+	col := AircraftColor(a, isSelected)
 
 	// Triangle aircraft symbol — tip points in heading direction (real ATC secondary target)
 	angle := (90 - a.Heading) * math.Pi / 180
@@ -732,7 +812,7 @@ func (r *Renderer) drawTrail(screen *ebiten.Image, a *aircraft.Aircraft, isSelec
 func (r *Renderer) drawGroundAircraft(screen *ebiten.Image, a *aircraft.Aircraft, isSelected bool) {
 	screenX, screenY := r.worldToScreen(a.X, a.Y)
 
-	col := aircraftColor(a, isSelected)
+	col := AircraftColor(a, isSelected)
 
 	size := float32(6)
 	if isSelected {
@@ -799,7 +879,7 @@ func drawTrendArrow(screen *ebiten.Image, x, y int, trend int) {
 // arrows can be drawn in green (up) or red (down) between the current and
 // target values.
 func (r *Renderer) drawDataTag(screen *ebiten.Image, a *aircraft.Aircraft, x, y float32, isSelected bool) {
-	col := aircraftColor(a, isSelected)
+	col := AircraftColor(a, isSelected)
 
 	// Calculate tag position from free-form offset
 	tagX := int(x) + a.DataTagOffX
@@ -995,13 +1075,17 @@ func (r *Renderer) drawUI(screen *ebiten.Image, airport *airport.Airport, aircra
 	zoomText := fmt.Sprintf("Zoom: %.1f px/nm (%d%%)", r.Scale, r.GetZoomPercentage())
 	ebitenutil.DebugPrintAt(screen, zoomText, 76, 26)
 
-	// Score / landed / difficulty (top-right)
+	// Score / landed / difficulty (top-right, offset by panel if visible)
 	scoreText := fmt.Sprintf("Score: %d  Landed: %d  Diff: %d", r.Score, r.LandedCount, r.Difficulty)
-	scoreX := r.ScreenWidth - len(scoreText)*6 - 10
+	scoreRight := r.ScreenWidth
+	if r.RadarOffsetX < 0 {
+		scoreRight = r.ScreenWidth + r.RadarOffsetX*2 // stay left of panel
+	}
+	scoreX := scoreRight - len(scoreText)*6 - 10
 	ebitenutil.DebugPrintAt(screen, scoreText, scoreX, 18)
 
 	// Instructions at bottom
-	instructions := "Ground: L=LineUp  T=Takeoff | Air: H=Hdg  A=Alt  S=Spd  D=Direct  W=Hold | Final: C=Land | Wheel=Zoom | ESC=Deselect"
+	instructions := "Ground: L=LineUp  T=Takeoff | Air: H=Hdg  A=Alt  S=Spd  D=Direct  W=Hold | Final: C=Land | Wheel=Zoom | Tab=Panel | ESC=Deselect"
 	ebitenutil.DebugPrintAt(screen, instructions, 10, r.ScreenHeight-16)
 }
 
@@ -1043,7 +1127,7 @@ func (r *Renderer) drawWindRose(screen *ebiten.Image, cx, cy int, windDir, windS
 
 // drawNorthIndicator draws a small N↑ marker at the top-center of the radar display
 func (r *Renderer) drawNorthIndicator(screen *ebiten.Image) {
-	cx := float32(r.ScreenWidth / 2)
+	cx := float32(r.radarCenterX())
 	// Place just below the top HUD bar
 	baseY := float32(62)
 	tickLen := float32(14)
@@ -1082,23 +1166,28 @@ func (r *Renderer) GetDataTagFieldAt(a *aircraft.Aircraft, ax, ay, sx, sy float3
 	return ""
 }
 
+// radarCenterX returns the horizontal pixel center of the radar area (accounting for panel offset).
+func (r *Renderer) radarCenterX() int {
+	return r.ScreenWidth/2 + r.RadarOffsetX
+}
+
 // worldToScreen converts world coordinates (nm) to screen coordinates
 func (r *Renderer) worldToScreen(x, y float64) (float32, float32) {
-	screenX := float32(r.ScreenWidth/2) + float32((x-r.CenterX)*r.Scale)
+	screenX := float32(r.radarCenterX()) + float32((x-r.CenterX)*r.Scale)
 	screenY := float32(r.ScreenHeight/2) - float32((y-r.CenterY)*r.Scale)
 	return screenX, screenY
 }
 
 // WorldToScreen converts world coordinates (nm) to screen coordinates (exported version)
 func (r *Renderer) WorldToScreen(x, y float64) (float64, float64) {
-	screenX := float64(r.ScreenWidth/2) + (x-r.CenterX)*r.Scale
+	screenX := float64(r.radarCenterX()) + (x-r.CenterX)*r.Scale
 	screenY := float64(r.ScreenHeight/2) - (y-r.CenterY)*r.Scale
 	return screenX, screenY
 }
 
 // screenToWorld converts screen coordinates to world coordinates (nm)
 func (r *Renderer) ScreenToWorld(screenX, screenY int) (float64, float64) {
-	x := r.CenterX + float64(screenX-r.ScreenWidth/2)/r.Scale
+	x := r.CenterX + float64(screenX-r.radarCenterX())/r.Scale
 	y := r.CenterY - float64(screenY-r.ScreenHeight/2)/r.Scale
 	return x, y
 }
