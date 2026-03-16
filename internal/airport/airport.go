@@ -21,6 +21,8 @@ type Runway struct {
 	Heading2 float64 `json:"heading2"`
 	Length   float64 `json:"length"`
 	Width    float64 `json:"width"`
+	CenterX  float64 `json:"centerX"` // nm east of airport reference point
+	CenterY  float64 `json:"centerY"` // nm north of airport reference point
 }
 
 // airports is the registry of loaded airports.
@@ -73,7 +75,7 @@ func GetRunwayThreshold(runway *Runway, runwayName string) (x, y, takeoffHeading
 	}
 
 	headingRad := (90 - thresholdDirection) * math.Pi / 180
-	x = halfLength * math.Cos(headingRad)
-	y = halfLength * math.Sin(headingRad)
+	x = runway.CenterX + halfLength*math.Cos(headingRad)
+	y = runway.CenterY + halfLength*math.Sin(headingRad)
 	return
 }

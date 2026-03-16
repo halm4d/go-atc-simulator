@@ -481,11 +481,15 @@ func (r *Renderer) drawRunway(screen *ebiten.Image, airportX, airportY float32, 
 	angle1 := float32((90 - runway.Heading1) * math.Pi / 180)
 	angle2 := float32((90 - runway.Heading2) * math.Pi / 180)
 
-	// Calculate endpoints
-	x1 := airportX + lengthPx/2*float32(math.Cos(float64(angle1)))
-	y1 := airportY - lengthPx/2*float32(math.Sin(float64(angle1)))
-	x2 := airportX + lengthPx/2*float32(math.Cos(float64(angle2)))
-	y2 := airportY - lengthPx/2*float32(math.Sin(float64(angle2)))
+	// Apply runway center offset (world nm → screen pixels)
+	rwyCenterX := airportX + float32(runway.CenterX*r.Scale)
+	rwyCenterY := airportY - float32(runway.CenterY*r.Scale) // Y inverted: north is up
+
+	// Calculate endpoints from runway center
+	x1 := rwyCenterX + lengthPx/2*float32(math.Cos(float64(angle1)))
+	y1 := rwyCenterY - lengthPx/2*float32(math.Sin(float64(angle1)))
+	x2 := rwyCenterX + lengthPx/2*float32(math.Cos(float64(angle2)))
+	y2 := rwyCenterY - lengthPx/2*float32(math.Sin(float64(angle2)))
 
 	// Draw runway with width representation
 	widthFt := runway.Width
