@@ -57,3 +57,14 @@ func HeadingTo(x1, y1, x2, y2 float64) float64 {
 	}
 	return heading
 }
+
+// NormalizeHeading wraps a heading value into the [0, 360) range.
+func NormalizeHeading(hdg float64) float64 {
+	for hdg < 0 {
+		hdg += 360
+	}
+	for hdg >= 360 {
+		hdg -= 360
+	}
+	return hdg
+}

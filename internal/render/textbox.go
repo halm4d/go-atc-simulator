@@ -43,7 +43,7 @@ func NewCommandTextBox(x, y, width, height int) *CommandTextBox {
 // Draw renders the command textbox
 func (ctb *CommandTextBox) Draw(screen *ebiten.Image, commandMode, commandInput string, selectedAircraft *aircraft.Aircraft) {
 	// Draw background
-	vector.DrawFilledRect(screen,
+	vector.FillRect(screen,
 		float32(ctb.X), float32(ctb.Y),
 		float32(ctb.Width), float32(ctb.Height),
 		ctb.BackgroundColor, false)
@@ -53,7 +53,7 @@ func (ctb *CommandTextBox) Draw(screen *ebiten.Image, commandMode, commandInput 
 	if ctb.IsDragging {
 		titleBarColor = color.RGBA{0, 200, 255, 255} // Brighter when dragging
 	}
-	vector.DrawFilledRect(screen,
+	vector.FillRect(screen,
 		float32(ctb.X), float32(ctb.Y),
 		float32(ctb.Width), float32(ctb.TitleBarHeight),
 		titleBarColor, false)

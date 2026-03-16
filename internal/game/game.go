@@ -76,7 +76,7 @@ type Game struct {
 // NewGame creates a new game instance starting at the airport selector menu
 func NewGame() *Game {
 	game := &Game{
-		Renderer:      render.NewRenderer(1280, 720, 8.0),
+		Renderer:      render.NewRenderer(DefaultScreenWidth, DefaultScreenHeight, DefaultZoomLevel),
 		InputHandler:  NewInputHandler(),
 		State:         "MENU",
 		MenuAirports:  data.GetAirportList(),
@@ -97,25 +97,25 @@ func (g *Game) startGame(icao string) {
 	g.Waypoints = airport.GetWaypoints(apt.ICAO)
 	g.Routes = airport.GetRoutes(apt.ICAO)
 	g.Aircraft = make([]*aircraft.Aircraft, 0)
-	g.CommandHistory = atc.NewCommandHistory(20)
+	g.CommandHistory = atc.NewCommandHistory(CommandHistorySize)
 	g.CommandTextBox = render.NewCommandTextBox(g.Renderer.ScreenWidth-330, 50, 300, 200)
 	g.RunwayMenu = render.NewRunwayMenu()
 	g.FlightStripPanel = render.NewFlightStripPanel(g.Renderer.ScreenWidth, g.Renderer.ScreenHeight)
 	g.SimTime = 0
 	g.LastUpdate = time.Now()
-	g.Score = 100
+	g.Score = InitialScore
 	g.CommandMode = ""
 	g.CommandInput = ""
 	g.ActiveLandingRunway = defaultLanding
 	g.ActiveTakeoffRunway = defaultTakeoff
-	g.SpawnInterval = 90.0
-	g.DepSpawnInterval = 120.0
+	g.SpawnInterval = SpawnIntervalArrival
+	g.DepSpawnInterval = SpawnIntervalDeparture
 	g.Difficulty = 1
 	g.LandedCount = 0
 	g.UsedCallsigns = make(map[string]bool)
 	g.GameOver = false
 	g.WindDirection = rand.Float64() * 360
-	g.WindSpeed = 5 + rand.Float64()*20 // 5–25 knots
+	g.WindSpeed = InitialWindSpeedMin + rand.Float64()*(InitialWindSpeedMax-InitialWindSpeedMin)
 	g.WindChangeTimer = 0
 	g.State = "PLAYING"
 
@@ -207,8 +207,6 @@ func (g *Game) generateCallsign() string {
 // isSafeToSpawn checks that a proposed spawn position has enough separation
 // from all existing airborne aircraft (at least 8nm horizontal or 2000ft vertical).
 func (g *Game) isSafeToSpawn(x, y, altitude float64) bool {
-	const minHoriz = 8.0  // nm — generous buffer above the 5nm separation minimum
-	const minVert = 2000.0 // ft — generous buffer above the 1000ft separation minimum
 	for _, a := range g.Aircraft {
 		if a.Phase == aircraft.PhaseHoldingShort || a.Phase == aircraft.PhaseLineUpWait ||
 			a.Phase == aircraft.PhaseLanded {
@@ -218,7 +216,7 @@ func (g *Game) isSafeToSpawn(x, y, altitude float64) bool {
 		dy := a.Y - y
 		dist := math.Sqrt(dx*dx + dy*dy)
 		altSep := math.Abs(a.Altitude - altitude)
-		if dist < minHoriz && altSep < minVert {
+		if dist < SpawnSafetyDistanceNm && altSep < SpawnSafetyAltitudeFt {
 			return false
 		}
 	}
@@ -280,7 +278,7 @@ func (g *Game) spawnArrival() {
 			}
 			// Spawn near the first STAR waypoint with a small offset
 			angle := rand.Float64() * 2 * math.Pi
-			offset := 3.0 + rand.Float64()*2.0
+			offset := STARSpawnOffsetMin + rand.Float64()*(STARSpawnOffsetMax-STARSpawnOffsetMin)
 			x := firstWP.X + offset*math.Cos(angle)
 			y := firstWP.Y + offset*math.Sin(angle)
 
@@ -324,13 +322,7 @@ func (g *Game) spawnArrivalRandom(callsign, typeCode string) {
 		}
 
 		toAirport := airport.HeadingTo(x, y, 0, 0)
-		heading := toAirport + (rand.Float64()*40 - 20)
-		if heading < 0 {
-			heading += 360
-		}
-		if heading >= 360 {
-			heading -= 360
-		}
+		heading := airport.NormalizeHeading(toAirport + (rand.Float64()*40 - 20))
 
 		speed := 220 + rand.Float64()*80
 		a := aircraft.NewAircraft(callsign, typeCode, x, y, altitude, heading, speed)
@@ -365,8 +357,8 @@ func (g *Game) spawnDeparture() {
 			pending++
 		}
 	}
-	if pending >= 3 {
-		return // Don't queue more than 3 departures at once
+	if pending >= MaxPendingDepartures {
+		return // Don't queue more than MaxPendingDepartures departures at once
 	}
 
 	rwyName := g.ActiveTakeoffRunway
@@ -392,12 +384,12 @@ func (g *Game) spawnDeparture() {
 
 // updateDifficulty adjusts spawn intervals based on landings
 func (g *Game) updateDifficulty() {
-	newDiff := 1 + g.LandedCount/5
+	newDiff := 1 + g.LandedCount/LandingsPerDifficulty
 	if newDiff > g.Difficulty {
 		g.Difficulty = newDiff
-		// Tighten spawn intervals (floor: 30s arrivals, 60s departures)
-		g.SpawnInterval = math.Max(30.0, 90.0-float64(g.Difficulty-1)*10.0)
-		g.DepSpawnInterval = math.Max(60.0, 120.0-float64(g.Difficulty-1)*10.0)
+		// Tighten spawn intervals (floor: MinSpawnIntervalArrival arrivals, MinSpawnIntervalDep departures)
+		g.SpawnInterval = math.Max(MinSpawnIntervalArrival, SpawnIntervalArrival-float64(g.Difficulty-1)*DifficultyIntervalStep)
+		g.DepSpawnInterval = math.Max(MinSpawnIntervalDep, SpawnIntervalDeparture-float64(g.Difficulty-1)*DifficultyIntervalStep)
 	}
 }
 
@@ -478,7 +470,7 @@ func (g *Game) checkAutoDescend() {
 		dx := a.X - a.ThresholdX
 		dy := a.Y - a.ThresholdY
 		dist := math.Sqrt(dx*dx + dy*dy)
-		if dist > 15 {
+		if dist > AutoDescendDistanceNm {
 			continue
 		}
 
@@ -487,11 +479,11 @@ func (g *Game) checkAutoDescend() {
 		if hdgDiff > 180 {
 			hdgDiff = 360 - hdgDiff
 		}
-		if hdgDiff > 30 {
+		if hdgDiff > ApproachHeadingToleranceDeg {
 			continue
 		}
 
-		targetAlt := g.Airport.Elevation + 3000
+		targetAlt := g.Airport.Elevation + AutoDescendTargetAltFt
 		if a.TargetAltitude > targetAlt {
 			a.TargetAltitude = targetAlt
 		}
@@ -517,22 +509,22 @@ func (g *Game) checkILSCapture() {
 				dy := a.Y - threshY
 				dist := math.Sqrt(dx*dx + dy*dy)
 
-				// Must be within 15 nm
-				if dist > 15 {
+				// Must be within ILSCaptureDistanceNm
+				if dist > ILSCaptureDistanceNm {
 					continue
 				}
 
-				// Must be at or below the glide slope altitude (+2000ft tolerance)
-				if a.Altitude > g.Airport.Elevation+dist*318+2000 {
+				// Must be at or below the glide slope altitude (+tolerance)
+				if a.Altitude > g.Airport.Elevation+dist*GlideSlopeGradientFtPerNm+GlideSlopeAltToleranceFt {
 					continue
 				}
 
-				// Must be within 30° of the approach heading
+				// Must be within ApproachHeadingToleranceDeg of the approach heading
 				hdgDiff := math.Abs(a.Heading - approachHdg)
 				if hdgDiff > 180 {
 					hdgDiff = 360 - hdgDiff
 				}
-				if hdgDiff > 30 {
+				if hdgDiff > ApproachHeadingToleranceDeg {
 					continue
 				}
 
@@ -576,7 +568,7 @@ func (g *Game) removeLandedAircraft() {
 	var remaining []*aircraft.Aircraft
 	for _, a := range g.Aircraft {
 		if a.Phase == aircraft.PhaseLanded {
-			g.Score += 50
+			g.Score += ScoreLanding
 			g.LandedCount++
 			g.removeAircraft(a)
 		} else {
@@ -589,18 +581,17 @@ func (g *Game) removeLandedAircraft() {
 // removeExitedAircraft removes aircraft that have flown beyond the radar sector (>50nm).
 // Departures award +25 points; arrivals that wander off gain nothing.
 func (g *Game) removeExitedAircraft() {
-	const exitRadius = 50.0
 	var remaining []*aircraft.Aircraft
 	for _, a := range g.Aircraft {
 		dist := math.Sqrt(a.X*a.X + a.Y*a.Y)
-		exited := dist > exitRadius &&
+		exited := dist > ExitRadiusNm &&
 			(a.Phase == aircraft.PhaseDeparture ||
 				a.Phase == aircraft.PhaseClimbout ||
 				a.Phase == aircraft.PhaseArrival ||
 				a.Phase == aircraft.PhaseHolding)
 		if exited {
 			if a.IsDeparture {
-				g.Score += 25
+				g.Score += ScoreDeparture
 			}
 			g.removeAircraft(a)
 		} else {
@@ -651,17 +642,11 @@ func (g *Game) Update() error {
 
 	// Gradually shift wind direction and speed
 	g.WindChangeTimer += deltaTime
-	if g.WindChangeTimer >= 30.0 {
+	if g.WindChangeTimer >= WindChangeIntervalSec {
 		g.WindChangeTimer = 0
-		g.WindDirection += (rand.Float64()*10 - 5) // ±5° per 30s
-		if g.WindDirection < 0 {
-			g.WindDirection += 360
-		}
-		if g.WindDirection >= 360 {
-			g.WindDirection -= 360
-		}
-		g.WindSpeed += (rand.Float64()*4 - 2) // ±2 kts per 30s
-		g.WindSpeed = math.Max(2, math.Min(35, g.WindSpeed))
+		g.WindDirection = airport.NormalizeHeading(g.WindDirection + (rand.Float64()*2*WindDirChangeDeg - WindDirChangeDeg))
+		g.WindSpeed += (rand.Float64()*2*WindSpeedChangeKts - WindSpeedChangeKts)
+		g.WindSpeed = math.Max(WindSpeedMin, math.Min(WindSpeedMax, g.WindSpeed))
 	}
 
 	// Auto-descend arrivals approaching the runway
@@ -683,9 +668,9 @@ func (g *Game) Update() error {
 	if len(g.Conflicts) > 0 {
 		for _, c := range g.Conflicts {
 			if c.Severity == "CRITICAL" {
-				g.Score -= 2
+				g.Score -= CriticalConflictPenalty
 			} else {
-				g.Score -= 1
+				g.Score -= ConflictPenalty
 			}
 		}
 		if g.Score < 0 {
@@ -754,13 +739,7 @@ func (g *Game) handleZoom() {
 			}
 			a.Commanded = true
 		case "HEADING":
-			a.TargetHeading += 5 * wheelY
-			for a.TargetHeading < 0 {
-				a.TargetHeading += 360
-			}
-			for a.TargetHeading >= 360 {
-				a.TargetHeading -= 360
-			}
+			a.TargetHeading = airport.NormalizeHeading(a.TargetHeading + 5*wheelY)
 			a.DirectTarget = "" // manual heading overrides any named target
 			a.Commanded = true
 		}
@@ -775,26 +754,79 @@ func (g *Game) handleZoom() {
 	}
 }
 
+// selectAircraft selects a new aircraft, deselecting any currently selected one.
+func (g *Game) selectAircraft(a *aircraft.Aircraft) {
+	if g.SelectedAircraft != nil {
+		g.SelectedAircraft.Selected = false
+	}
+	g.SelectedAircraft = a
+	a.Selected = true
+	g.CommandMode = ""
+	g.CommandInput = ""
+	g.ActiveField = ""
+	g.ActiveAircraft = nil
+}
+
+// deselectAircraft clears the current selection and all related state.
+func (g *Game) deselectAircraft() {
+	if g.SelectedAircraft != nil {
+		g.SelectedAircraft.Selected = false
+	}
+	g.SelectedAircraft = nil
+	g.CommandMode = ""
+	g.CommandInput = ""
+	g.ActiveField = ""
+	g.ActiveAircraft = nil
+}
+
+// resetDragState clears all drag-to-waypoint state.
+func (g *Game) resetDragState() {
+	g.SymbolDragCandidate = nil
+	g.Renderer.DraggingToWP = nil
+	g.Renderer.DragToWPActive = false
+	g.Renderer.DropTarget = ""
+}
+
 // handleInput processes user input
 func (g *Game) handleInput() {
+	if g.handleUIToggles() {
+		return
+	}
+	if g.handleDragOperations() {
+		return
+	}
+	if g.handleDragToWaypoint() {
+		return
+	}
+	if g.handleMouseSelection() {
+		return
+	}
+	g.handleRightClick()
+	g.handleRunwayMenu()
+	g.handleCommandInput()
+}
+
+// handleUIToggles handles Tab toggle, F1 help, help overlay ESC.
+// Returns true if input was consumed.
+func (g *Game) handleUIToggles() bool {
 	// Toggle flight strip panel
 	if g.InputHandler.IsKeyJustPressed(ebiten.KeyTab) {
 		if g.FlightStripPanel != nil {
 			g.FlightStripPanel.Visible = !g.FlightStripPanel.Visible
 		}
-		return
+		return true
 	}
 
 	// Toggle help overlay
 	if g.InputHandler.IsKeyJustPressed(ebiten.KeyF1) {
 		g.ShowHelp = !g.ShowHelp
-		return
+		return true
 	}
 	if g.ShowHelp {
 		if g.InputHandler.IsKeyJustPressed(ebiten.KeyEscape) {
 			g.ShowHelp = false
 		}
-		return
+		return true
 	}
 
 	// Handle flight strip panel clicks
@@ -802,36 +834,30 @@ func (g *Game) handleInput() {
 		if g.FlightStripPanel.IsMouseInPanel(g.InputHandler.MouseX, g.InputHandler.MouseY) {
 			clicked := g.FlightStripPanel.HandleClick(g.InputHandler.MouseX, g.InputHandler.MouseY, g.Aircraft, g.SelectedAircraft)
 			if clicked != nil {
-				// Deselect old
-				if g.SelectedAircraft != nil {
-					g.SelectedAircraft.Selected = false
-				}
 				// Select new (or toggle off if same)
 				if g.SelectedAircraft == clicked {
-					g.SelectedAircraft = nil
-					g.CommandMode = ""
-					g.CommandInput = ""
-					g.ActiveField = ""
-					g.ActiveAircraft = nil
+					g.deselectAircraft()
 				} else {
-					clicked.Selected = true
-					g.SelectedAircraft = clicked
-					g.CommandMode = ""
-					g.CommandInput = ""
-					g.ActiveField = ""
-					g.ActiveAircraft = nil
+					g.selectAircraft(clicked)
 				}
 			}
-			return
+			return true
 		}
 	}
 
+	return false
+}
+
+// handleDragOperations handles textbox drag, label/tag drag initiation,
+// data tag drag update, and label drag update.
+// Returns true if input was consumed.
+func (g *Game) handleDragOperations() bool {
 	// Handle textbox dragging
 	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
 		// Check if clicking textbox title bar to start dragging
 		if g.CommandTextBox.IsMouseInTitleBar(g.InputHandler.MouseX, g.InputHandler.MouseY) {
 			g.CommandTextBox.StartDrag(g.InputHandler.MouseX, g.InputHandler.MouseY)
-			return // Don't process other clicks when starting drag
+			return true // Don't process other clicks when starting drag
 		}
 	}
 
@@ -871,17 +897,9 @@ func (g *Game) handleInput() {
 					}
 				} else {
 					// Select the aircraft whose tag was clicked
-					if g.SelectedAircraft != nil {
-						g.SelectedAircraft.Selected = false
-					}
-					g.SelectedAircraft = a
-					g.SelectedAircraft.Selected = true
-					g.CommandMode = ""
-					g.CommandInput = ""
-					g.ActiveField = ""
-					g.ActiveAircraft = nil
+					g.selectAircraft(a)
 				}
-				return
+				return true
 			}
 		}
 
@@ -892,7 +910,7 @@ func (g *Game) handleInput() {
 			g.Renderer.DraggingLabel = hit
 			g.Renderer.DragOffsetX = mx - rect.X
 			g.Renderer.DragOffsetY = my - rect.Y
-			return
+			return true
 		}
 	}
 	// Update data tag drag
@@ -905,7 +923,7 @@ func (g *Game) handleInput() {
 		} else {
 			g.Renderer.DraggingAircraft = nil
 		}
-		return
+		return true
 	}
 	// Update label drag (waypoints and runways)
 	if g.Renderer.DraggingLabel != "" {
@@ -936,24 +954,26 @@ func (g *Game) handleInput() {
 		} else {
 			g.Renderer.DraggingLabel = ""
 		}
-		return
+		return true
 	}
 
+	return false
+}
+
+// handleDragToWaypoint handles drag-to-waypoint threshold check,
+// drop target tracking, mouse-up release with drop detection or
+// click-to-select fallback, and ESC cancel.
+// Returns true if input was consumed.
+func (g *Game) handleDragToWaypoint() bool {
 	// Drag-to-waypoint: threshold check (each frame while mouse held)
 	if g.SymbolDragCandidate != nil && ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
 		dx := g.InputHandler.MouseX - g.SymbolDragStartX
 		dy := g.InputHandler.MouseY - g.SymbolDragStartY
-		if !g.Renderer.DragToWPActive && (dx*dx+dy*dy) > 25 { // 5px threshold
+		if !g.Renderer.DragToWPActive && (dx*dx+dy*dy) > DragThresholdPxSq {
 			g.Renderer.DraggingToWP = g.SymbolDragCandidate
 			g.Renderer.DragToWPActive = true
 			// Select the aircraft being dragged
-			if g.SelectedAircraft != nil {
-				g.SelectedAircraft.Selected = false
-			}
-			g.SelectedAircraft = g.SymbolDragCandidate
-			g.SelectedAircraft.Selected = true
-			g.CommandMode = ""
-			g.CommandInput = ""
+			g.selectAircraft(g.SymbolDragCandidate)
 		}
 	}
 
@@ -992,45 +1012,33 @@ func (g *Game) handleInput() {
 			}
 		} else {
 			// No drag occurred — perform normal click-to-select
-			a := g.SymbolDragCandidate
-			if g.SelectedAircraft != nil {
-				g.SelectedAircraft.Selected = false
-			}
-			g.SelectedAircraft = a
-			a.Selected = true
-			g.CommandMode = ""
-			g.CommandInput = ""
-			g.ActiveField = ""
-			g.ActiveAircraft = nil
+			g.selectAircraft(g.SymbolDragCandidate)
 		}
 		// Reset drag state
-		g.SymbolDragCandidate = nil
-		g.Renderer.DraggingToWP = nil
-		g.Renderer.DragToWPActive = false
-		g.Renderer.DropTarget = ""
-		return
+		g.resetDragState()
+		return true
 	}
 
 	// ESC to deselect and clear any active field
 	if g.InputHandler.IsKeyJustPressed(ebiten.KeyEscape) {
-		g.SelectedAircraft = nil
-		g.CommandMode = ""
-		g.CommandInput = ""
-		g.ActiveField = ""
-		g.ActiveAircraft = nil
+		g.deselectAircraft()
 		// Also cancel any in-progress drag
-		g.SymbolDragCandidate = nil
-		g.Renderer.DraggingToWP = nil
-		g.Renderer.DragToWPActive = false
-		g.Renderer.DropTarget = ""
-		return
+		g.resetDragState()
+		return true
 	}
 
+	return false
+}
+
+// handleMouseSelection handles left-click aircraft selection (datatag click
+// or symbol click), includes textbox check.
+// Returns true if input was consumed.
+func (g *Game) handleMouseSelection() bool {
 	// Mouse click to select aircraft or start drag-to-waypoint (only if not clicking in textbox)
 	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
 		// Don't select aircraft if clicking inside the textbox
 		if g.CommandTextBox.IsMouseInTextBox(g.InputHandler.MouseX, g.InputHandler.MouseY) {
-			return
+			return true
 		}
 
 		worldX, worldY := g.Renderer.ScreenToWorld(g.InputHandler.MouseX, g.InputHandler.MouseY)
@@ -1051,15 +1059,7 @@ func (g *Game) handleInput() {
 						g.ActiveAircraft = nil
 					}
 				} else {
-					if g.SelectedAircraft != nil {
-						g.SelectedAircraft.Selected = false
-					}
-					g.SelectedAircraft = clicked
-					g.SelectedAircraft.Selected = true
-					g.CommandMode = ""
-					g.CommandInput = ""
-					g.ActiveField = ""
-					g.ActiveAircraft = nil
+					g.selectAircraft(clicked)
 				}
 			} else if clicked.IsCommandable() {
 				// Symbol click on commandable aircraft — defer selection, start drag candidate
@@ -1068,19 +1068,17 @@ func (g *Game) handleInput() {
 				g.SymbolDragStartY = g.InputHandler.MouseY
 			} else {
 				// Symbol click on non-commandable aircraft — just select
-				if g.SelectedAircraft != nil {
-					g.SelectedAircraft.Selected = false
-				}
-				g.SelectedAircraft = clicked
-				g.SelectedAircraft.Selected = true
-				g.CommandMode = ""
-				g.CommandInput = ""
-				g.ActiveField = ""
-				g.ActiveAircraft = nil
+				g.selectAircraft(clicked)
 			}
 		}
 	}
 
+	return false
+}
+
+// handleRightClick handles right-click to reset datatag, reset label,
+// or open the airport runway menu.
+func (g *Game) handleRightClick() {
 	// Right-click on label/tag → reset position
 	// Right-click near airport → open runway config menu
 	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonRight) {
@@ -1114,12 +1112,15 @@ func (g *Game) handleInput() {
 		airportSX, airportSY := g.Renderer.WorldToScreen(0, 0)
 		dx := float64(mx) - airportSX
 		dy := float64(my) - airportSY
-		if math.Sqrt(dx*dx+dy*dy) < 30 {
+		if math.Sqrt(dx*dx+dy*dy) < AirportClickRadius {
 			g.RunwayMenu.Show(mx+10, my, g.Airport, g.Renderer.ScreenWidth, g.Renderer.ScreenHeight)
 			return
 		}
 	}
+}
 
+// handleRunwayMenu handles left-click on runway menu buttons or closes the menu.
+func (g *Game) handleRunwayMenu() {
 	// Left-click: handle runway menu buttons or close menu
 	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
 		mx, my := g.InputHandler.MouseX, g.InputHandler.MouseY
@@ -1137,12 +1138,13 @@ func (g *Game) handleInput() {
 					g.RunwayMenu.Hide()
 				}
 			}
-			if g.RunwayMenu.Visible {
-				return // consume click so it doesn't also select an aircraft
-			}
 		}
 	}
+}
 
+// handleCommandInput handles command mode selection (H/A/S/D/W/L/T/C keys),
+// number input, enter to confirm, and backspace.
+func (g *Game) handleCommandInput() {
 	// Command input (only if aircraft selected)
 	if g.SelectedAircraft == nil {
 		return
@@ -1370,16 +1372,16 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		sw := float32(g.Renderer.ScreenWidth)
 		sh := float32(g.Renderer.ScreenHeight)
 		// Full-screen dim overlay
-		vector.DrawFilledRect(screen, 0, 0, sw, sh, color.RGBA{0, 0, 0, 160}, false)
+		vector.FillRect(screen, 0, 0, sw, sh, color.RGBA{0, 0, 0, 160}, false)
 		// Centered panel
 		panelW := float32(340)
 		panelH := float32(130)
 		panelX := sw/2 - panelW/2
 		panelY := sh/2 - panelH/2
-		vector.DrawFilledRect(screen, panelX, panelY, panelW, panelH, color.RGBA{10, 0, 0, 235}, false)
+		vector.FillRect(screen, panelX, panelY, panelW, panelH, color.RGBA{10, 0, 0, 235}, false)
 		vector.StrokeRect(screen, panelX, panelY, panelW, panelH, 2, color.RGBA{220, 0, 0, 255}, false)
 		// Title bar
-		vector.DrawFilledRect(screen, panelX, panelY, panelW, 22, color.RGBA{180, 0, 0, 200}, false)
+		vector.FillRect(screen, panelX, panelY, panelW, 22, color.RGBA{180, 0, 0, 200}, false)
 		textX := int(panelX) + 12
 		ebitenutil.DebugPrintAt(screen, "=== GAME OVER ===", textX+50, int(panelY)+4)
 		ebitenutil.DebugPrintAt(screen, fmt.Sprintf("Aircraft landed: %d", g.LandedCount), textX, int(panelY)+32)
@@ -1408,18 +1410,18 @@ func (g *Game) drawHelp(screen *ebiten.Image) {
 	sh := float32(g.Renderer.ScreenHeight)
 
 	// Dim background
-	vector.DrawFilledRect(screen, 0, 0, sw, sh, color.RGBA{0, 0, 0, 160}, false)
+	vector.FillRect(screen, 0, 0, sw, sh, color.RGBA{0, 0, 0, 160}, false)
 
 	// Centered panel
 	panelW := float32(540)
 	panelH := float32(610)
 	px := sw/2 - panelW/2
 	py := sh/2 - panelH/2
-	vector.DrawFilledRect(screen, px, py, panelW, panelH, color.RGBA{0, 12, 24, 245}, false)
+	vector.FillRect(screen, px, py, panelW, panelH, color.RGBA{0, 12, 24, 245}, false)
 	vector.StrokeRect(screen, px, py, panelW, panelH, 2, color.RGBA{0, 200, 255, 220}, false)
 
 	// Title bar
-	vector.DrawFilledRect(screen, px, py, panelW, 22, color.RGBA{0, 80, 130, 220}, false)
+	vector.FillRect(screen, px, py, panelW, 22, color.RGBA{0, 80, 130, 220}, false)
 	ebitenutil.DebugPrintAt(screen, "ATC SIMULATOR - HELP", int(px)+panelW2(panelW, "ATC SIMULATOR - HELP"), int(py)+5)
 
 	// Content
@@ -1498,12 +1500,12 @@ func (g *Game) drawMenu(screen *ebiten.Image) {
 	panelH := float32(240)
 	panelX := sw/2 - panelW/2
 	panelY := sh/2 - panelH/2
-	vector.DrawFilledRect(screen, panelX, panelY, panelW, panelH, color.RGBA{0, 12, 24, 245}, false)
+	vector.FillRect(screen, panelX, panelY, panelW, panelH, color.RGBA{0, 12, 24, 245}, false)
 	vector.StrokeRect(screen, panelX, panelY, panelW, panelH, 2, color.RGBA{0, 200, 255, 220}, false)
 
 	// Title bar
 	titleH := float32(28)
-	vector.DrawFilledRect(screen, panelX, panelY, panelW, titleH, color.RGBA{0, 80, 130, 220}, false)
+	vector.FillRect(screen, panelX, panelY, panelW, titleH, color.RGBA{0, 80, 130, 220}, false)
 	vector.StrokeLine(screen, panelX, panelY+titleH, panelX+panelW, panelY+titleH, 1, color.RGBA{0, 200, 255, 180}, false)
 	ebitenutil.DebugPrintAt(screen, "ATC SIMULATOR", int(panelX)+165, int(panelY)+8)
 
@@ -1522,7 +1524,7 @@ func (g *Game) drawMenu(screen *ebiten.Image) {
 		rowY := listStartY + i*rowH
 		// Highlight selected row
 		if i == g.MenuSelection {
-			vector.DrawFilledRect(screen, panelX+4, float32(rowY)-2, panelW-8, float32(rowH)-4, color.RGBA{0, 60, 100, 180}, false)
+			vector.FillRect(screen, panelX+4, float32(rowY)-2, panelW-8, float32(rowH)-4, color.RGBA{0, 60, 100, 180}, false)
 			vector.StrokeRect(screen, panelX+4, float32(rowY)-2, panelW-8, float32(rowH)-4, 1, color.RGBA{0, 200, 255, 150}, false)
 			ebitenutil.DebugPrintAt(screen, ">", int(panelX)+8, rowY+14)
 		}

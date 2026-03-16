@@ -113,7 +113,7 @@ func (p *FlightStripPanel) Draw(screen *ebiten.Image, aircraftList []*aircraft.A
 	}
 
 	// Panel background
-	vector.DrawFilledRect(screen, float32(p.X), float32(p.Y),
+	vector.FillRect(screen, float32(p.X), float32(p.Y),
 		float32(p.Width), float32(p.Height),
 		color.RGBA{10, 18, 30, 240}, false)
 
@@ -123,7 +123,7 @@ func (p *FlightStripPanel) Draw(screen *ebiten.Image, aircraftList []*aircraft.A
 		1, color.RGBA{0, 120, 180, 200}, false)
 
 	// Header bar
-	vector.DrawFilledRect(screen, float32(p.X), float32(p.Y),
+	vector.FillRect(screen, float32(p.X), float32(p.Y),
 		float32(p.Width), float32(headerHeight),
 		color.RGBA{0, 60, 100, 220}, false)
 	ebitenutil.DebugPrintAt(screen, "FLIGHT STRIPS", p.X+6, p.Y+5)
@@ -176,9 +176,9 @@ func (p *FlightStripPanel) Draw(screen *ebiten.Image, aircraftList []*aircraft.A
 			thumbH = 10
 		}
 		thumbY := float32(listY) + float32(p.ScrollOffset)/float32(totalH)*trackH
-		vector.DrawFilledRect(screen, trackX, float32(listY), 3, trackH,
+		vector.FillRect(screen, trackX, float32(listY), 3, trackH,
 			color.RGBA{30, 50, 70, 150}, false)
-		vector.DrawFilledRect(screen, trackX, thumbY, 3, thumbH,
+		vector.FillRect(screen, trackX, thumbY, 3, thumbH,
 			color.RGBA{0, 150, 220, 200}, false)
 	}
 
@@ -219,11 +219,11 @@ func (p *FlightStripPanel) drawAircraftRow(screen *ebiten.Image, a *aircraft.Air
 		return
 	}
 
-	vector.DrawFilledRect(screen, float32(p.X+1), float32(drawY),
+	vector.FillRect(screen, float32(p.X+1), float32(drawY),
 		float32(p.Width-2), float32(drawH), bgColor, false)
 
 	// Colored left bar indicator (shows aircraft phase color)
-	vector.DrawFilledRect(screen, float32(p.X+1), float32(drawY),
+	vector.FillRect(screen, float32(p.X+1), float32(drawY),
 		3, float32(drawH), col, false)
 
 	// Selection indicator
@@ -238,7 +238,7 @@ func (p *FlightStripPanel) drawAircraftRow(screen *ebiten.Image, a *aircraft.Air
 		if conflictSeverity == "CRITICAL" {
 			badgeCol = ColorCritical
 		}
-		vector.DrawFilledRect(screen, float32(p.X+p.Width-22), float32(rowY+2), 18, 12, badgeCol, false)
+		vector.FillRect(screen, float32(p.X+p.Width-22), float32(rowY+2), 18, 12, badgeCol, false)
 		ebitenutil.DebugPrintAt(screen, "CA", p.X+p.Width-20, rowY+2)
 	}
 
@@ -290,12 +290,12 @@ func (p *FlightStripPanel) drawAircraftRow(screen *ebiten.Image, a *aircraft.Air
 // drawDetailSection renders extended aircraft info when selected.
 func (p *FlightStripPanel) drawDetailSection(screen *ebiten.Image, a *aircraft.Aircraft, y int) {
 	// Background
-	vector.DrawFilledRect(screen, float32(p.X), float32(y),
+	vector.FillRect(screen, float32(p.X), float32(y),
 		float32(p.Width), float32(detailHeight),
 		color.RGBA{5, 15, 25, 240}, false)
 
 	// Header
-	vector.DrawFilledRect(screen, float32(p.X), float32(y),
+	vector.FillRect(screen, float32(p.X), float32(y),
 		float32(p.Width), 16,
 		color.RGBA{0, 50, 80, 200}, false)
 	ebitenutil.DebugPrintAt(screen, fmt.Sprintf("DETAIL: %s", a.Callsign), p.X+6, y+3)
@@ -347,12 +347,12 @@ func (p *FlightStripPanel) drawCommandSection(screen *ebiten.Image, a *aircraft.
 	commandMode, commandInput string, y int) {
 
 	// Background
-	vector.DrawFilledRect(screen, float32(p.X), float32(y),
+	vector.FillRect(screen, float32(p.X), float32(y),
 		float32(p.Width), float32(commandHeight),
 		color.RGBA{8, 12, 20, 240}, false)
 
 	// Header
-	vector.DrawFilledRect(screen, float32(p.X), float32(y),
+	vector.FillRect(screen, float32(p.X), float32(y),
 		float32(p.Width), 16,
 		color.RGBA{0, 40, 70, 200}, false)
 	ebitenutil.DebugPrintAt(screen, "COMMANDS", p.X+6, y+3)

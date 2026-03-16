@@ -283,7 +283,6 @@ func (r *Renderer) drawRoutes(screen *ebiten.Image, routes []airport.Route, wayp
 		charH := 12
 		lw := len(route.Name) * charW
 		lh := charH
-		lx, ly := int(ex)-lw/2, int(ey)-lh-8
 
 		// Avoid overlapping already-placed labels
 		offsets := [][2]int{
@@ -292,20 +291,7 @@ func (r *Renderer) drawRoutes(screen *ebiten.Image, routes []airport.Route, wayp
 			{10, -lh / 2},       // right
 			{-lw - 6, -lh / 2},  // left
 		}
-		for _, off := range offsets {
-			cx, cy := int(ex)+off[0], int(ey)+off[1]
-			overlap := false
-			for _, p := range r.placedLabels {
-				if cx < p.X+p.W && cx+lw > p.X && cy < p.Y+p.H && cy+lh > p.Y {
-					overlap = true
-					break
-				}
-			}
-			if !overlap {
-				lx, ly = cx, cy
-				break
-			}
-		}
+		lx, ly := r.findNonOverlappingPosition(int(ex), int(ey), lw, lh, offsets)
 
 		ebitenutil.DebugPrintAt(screen, route.Name, lx, ly)
 		routeRect := labelRect{lx, ly, lw, lh}
@@ -315,6 +301,26 @@ func (r *Renderer) drawRoutes(screen *ebiten.Image, routes []airport.Route, wayp
 		// Draw a small leader line from label to entry waypoint
 		vector.StrokeLine(screen, float32(lx+lw/2), float32(ly+lh), ex, ey, 1, labelColor, false)
 	}
+}
+
+// findNonOverlappingPosition finds the first non-overlapping label position from a list of offset candidates.
+// Returns the chosen (x, y) position for the label.
+func (r *Renderer) findNonOverlappingPosition(anchorX, anchorY, labelW, labelH int, offsets [][2]int) (int, int) {
+	bestX, bestY := anchorX+offsets[0][0], anchorY+offsets[0][1]
+	for _, off := range offsets {
+		cx, cy := anchorX+off[0], anchorY+off[1]
+		overlap := false
+		for _, p := range r.placedLabels {
+			if cx < p.X+p.W && cx+labelW > p.X && cy < p.Y+p.H && cy+labelH > p.Y {
+				overlap = true
+				break
+			}
+		}
+		if !overlap {
+			return cx, cy
+		}
+	}
+	return bestX, bestY
 }
 
 // drawWaypoints draws waypoint markers with non-overlapping, draggable labels.
@@ -351,23 +357,7 @@ func (r *Renderer) drawWaypoints(screen *ebiten.Image, waypoints []airport.Waypo
 				{-lw/2 + 4, -lh - 6}, // centered above
 				{-lw/2 + 4, lh},      // centered below
 			}
-
-			bestOff := offsets[0]
-			for _, off := range offsets {
-				rx, ry := sx+off[0], sy+off[1]
-				overlaps := false
-				for _, p := range r.placedLabels {
-					if rx < p.X+p.W && rx+lw > p.X && ry < p.Y+p.H && ry+lh > p.Y {
-						overlaps = true
-						break
-					}
-				}
-				if !overlaps {
-					bestOff = off
-					break
-				}
-			}
-			lx, ly = sx+bestOff[0], sy+bestOff[1]
+			lx, ly = r.findNonOverlappingPosition(sx, sy, lw, lh, offsets)
 		}
 
 		// Draw leader line from marker to label
@@ -476,7 +466,7 @@ func (r *Renderer) drawAirport(screen *ebiten.Image, airport *airport.Airport) {
 	// Draw background for label
 	labelX := int(centerX) + 30
 	labelY := int(centerY) - 25
-	vector.DrawFilledRect(screen, float32(labelX-2), float32(labelY-2), 50, 14, ColorBackground, false)
+	vector.FillRect(screen, float32(labelX-2), float32(labelY-2), 50, 14, ColorBackground, false)
 	ebitenutil.DebugPrintAt(screen, label, labelX, labelY)
 	r.placedLabels = append(r.placedLabels, labelRect{labelX - 2, labelY - 2, 54, 18})
 }
@@ -611,7 +601,7 @@ func (r *Renderer) drawRunwayLabel(screen *ebiten.Image, label string, x, y int,
 	}
 
 	// Dark background with border
-	vector.DrawFilledRect(screen, boxX-2, boxY-2, boxWidth+4, boxHeight+4, ColorBackground, false)
+	vector.FillRect(screen, boxX-2, boxY-2, boxWidth+4, boxHeight+4, ColorBackground, false)
 	vector.StrokeRect(screen, boxX-2, boxY-2, boxWidth+4, boxHeight+4, 1, col, false)
 
 	// Draw text
@@ -804,7 +794,7 @@ func (r *Renderer) drawTrail(screen *ebiten.Image, a *aircraft.Aircraft, isSelec
 		alpha := uint8(30 + 130*i/n)
 		dotCol := color.RGBA{40, 80, 200, alpha}
 		sx, sy := r.worldToScreen(pos[0], pos[1])
-		vector.DrawFilledCircle(screen, sx, sy, 2, dotCol, false)
+		vector.FillCircle(screen, sx, sy, 2, dotCol, false)
 	}
 }
 
@@ -891,7 +881,7 @@ func (r *Renderer) drawDataTag(screen *ebiten.Image, a *aircraft.Aircraft, x, y 
 	// Dark backing rectangle for readability
 	// Width 136: covers row-2 "ALT→ALT SPD→SPD PHASE" (~125px max) + 6px padding
 	// Height 54: 3 rows × 16px line-height + 6px padding
-	vector.DrawFilledRect(screen, float32(tagX-3), float32(tagY-3), 136, 54, color.RGBA{0, 5, 15, 180}, false)
+	vector.FillRect(screen, float32(tagX-3), float32(tagY-3), 136, 54, color.RGBA{0, 5, 15, 180}, false)
 	vector.StrokeRect(screen, float32(tagX-3), float32(tagY-3), 136, 54, 1, color.RGBA{0, 60, 90, 120}, false)
 
 	// Active-field highlight row
@@ -900,7 +890,7 @@ func (r *Renderer) drawDataTag(screen *ebiten.Image, a *aircraft.Aircraft, x, y 
 		if r.ActiveField == "HEADING" {
 			highlightY = float32(tagY + 29) // row 3
 		}
-		vector.DrawFilledRect(screen, float32(tagX-3), highlightY, 136, 16, color.RGBA{0, 120, 180, 80}, false)
+		vector.FillRect(screen, float32(tagX-3), highlightY, 136, 16, color.RGBA{0, 120, 180, 80}, false)
 		vector.StrokeRect(screen, float32(tagX-3), highlightY, 136, 16, 1, color.RGBA{0, 200, 255, 160}, false)
 	}
 
@@ -910,7 +900,7 @@ func (r *Renderer) drawDataTag(screen *ebiten.Image, a *aircraft.Aircraft, x, y 
 		if severity == "CRITICAL" {
 			caColor = color.RGBA{255, 30, 30, 240}
 		}
-		vector.DrawFilledRect(screen, float32(tagX-3), float32(tagY-16), 18, 12, caColor, false)
+		vector.FillRect(screen, float32(tagX-3), float32(tagY-16), 18, 12, caColor, false)
 		ebitenutil.DebugPrintAt(screen, "CA", tagX-2, tagY-15)
 	}
 
@@ -1042,7 +1032,7 @@ func (r *Renderer) drawConflicts(screen *ebiten.Image, conflicts []atc.Conflict,
 			ringColor = color.RGBA{255, 100, 0, 200}
 		}
 
-		vector.DrawFilledCircle(screen, sx, sy, radius, fillColor, false)
+		vector.FillCircle(screen, sx, sy, radius, fillColor, false)
 		vector.StrokeCircle(screen, sx, sy, radius, 2, ringColor, false)
 	}
 }
@@ -1055,11 +1045,11 @@ func (r *Renderer) drawUI(screen *ebiten.Image, airport *airport.Airport, aircra
 	panelBorder := color.RGBA{0, 80, 120, 200}
 
 	// Top panel bar
-	vector.DrawFilledRect(screen, 0, 0, sw, 48, panelBg, false)
+	vector.FillRect(screen, 0, 0, sw, 48, panelBg, false)
 	vector.StrokeLine(screen, 0, 48, sw, 48, 1, panelBorder, false)
 
 	// Bottom panel bar
-	vector.DrawFilledRect(screen, 0, sh-22, sw, 22, panelBg, false)
+	vector.FillRect(screen, 0, sh-22, sw, 22, panelBg, false)
 	vector.StrokeLine(screen, 0, sh-22, sw, sh-22, 1, panelBorder, false)
 
 	// Wind rose (top-left, inside panel)

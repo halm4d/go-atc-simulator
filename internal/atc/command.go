@@ -5,6 +5,19 @@ import (
 	"fmt"
 )
 
+// FlightLevelThreshold is the altitude (in feet) at or above which altitudes
+// are expressed as flight levels (e.g., FL180 instead of 18000 ft).
+const FlightLevelThreshold = 18000
+
+// FormatAltitude returns a human-readable altitude string.
+// At or above the flight level threshold it returns "FL180"; below, "18000".
+func FormatAltitude(altFt int) string {
+	if altFt >= FlightLevelThreshold {
+		return fmt.Sprintf("FL%d", altFt/100)
+	}
+	return fmt.Sprintf("%d", altFt)
+}
+
 // CommandType represents the type of ATC command
 type CommandType int
 
@@ -84,7 +97,7 @@ func IssueAltitudeCommand(a *aircraft.Aircraft, altitude float64, history *Comma
 	}
 
 	altStr := ""
-	if altitude >= 18000 {
+	if altitude >= FlightLevelThreshold {
 		altStr = fmt.Sprintf("flight level %d", int(altitude/100))
 	} else {
 		altStr = fmt.Sprintf("%d feet", int(altitude))
@@ -167,10 +180,7 @@ func (c *Command) GetCommandString() string {
 	case CommandHeading:
 		return fmt.Sprintf("%s HDG %03d", c.Aircraft.Callsign, int(c.Value))
 	case CommandAltitude:
-		if c.Value >= 18000 {
-			return fmt.Sprintf("%s ALT FL%d", c.Aircraft.Callsign, int(c.Value/100))
-		}
-		return fmt.Sprintf("%s ALT %d", c.Aircraft.Callsign, int(c.Value))
+		return fmt.Sprintf("%s ALT %s", c.Aircraft.Callsign, FormatAltitude(int(c.Value)))
 	case CommandSpeed:
 		return fmt.Sprintf("%s SPD %d", c.Aircraft.Callsign, int(c.Value))
 	case CommandLineUpWait:

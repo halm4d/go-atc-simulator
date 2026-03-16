@@ -81,11 +81,11 @@ func (m *RunwayMenu) Draw(screen *ebiten.Image, activeLanding, activeTakeoff str
 	titleCol := color.RGBA{0, 90, 140, 255}
 
 	// Background + border
-	vector.DrawFilledRect(screen, float32(m.X), float32(m.Y), float32(menuW), float32(h), bgCol, false)
+	vector.FillRect(screen, float32(m.X), float32(m.Y), float32(menuW), float32(h), bgCol, false)
 	vector.StrokeRect(screen, float32(m.X), float32(m.Y), float32(menuW), float32(h), 2, borderCol, false)
 
 	// Title bar
-	vector.DrawFilledRect(screen, float32(m.X), float32(m.Y), float32(menuW), float32(menuTitleH), titleCol, false)
+	vector.FillRect(screen, float32(m.X), float32(m.Y), float32(menuW), float32(menuTitleH), titleCol, false)
 	vector.StrokeLine(screen,
 		float32(m.X), float32(m.Y+menuTitleH),
 		float32(m.X+menuW), float32(m.Y+menuTitleH),
@@ -95,7 +95,7 @@ func (m *RunwayMenu) Draw(screen *ebiten.Image, activeLanding, activeTakeoff str
 	// Close [X] button in title bar
 	closeX := m.X + menuW - 26
 	closeY := m.Y + 2
-	vector.DrawFilledRect(screen, float32(closeX), float32(closeY), 22, float32(menuTitleH-4), color.RGBA{140, 0, 0, 200}, false)
+	vector.FillRect(screen, float32(closeX), float32(closeY), 22, float32(menuTitleH-4), color.RGBA{140, 0, 0, 200}, false)
 	ebitenutil.DebugPrintAt(screen, " X", closeX, closeY+2)
 	m.buttons = append(m.buttons, menuButton{x: closeX, y: closeY, w: 22, h: menuTitleH - 4, action: "CLOSE"})
 
@@ -120,7 +120,7 @@ func (m *RunwayMenu) Draw(screen *ebiten.Image, activeLanding, activeTakeoff str
 				landBg = color.RGBA{0, 160, 50, 255}
 				landBorder = color.RGBA{0, 255, 100, 255}
 			}
-			vector.DrawFilledRect(screen, float32(landX), float32(rowY), menuBtnW, menuBtnH, landBg, false)
+			vector.FillRect(screen, float32(landX), float32(rowY), menuBtnW, menuBtnH, landBg, false)
 			vector.StrokeRect(screen, float32(landX), float32(rowY), menuBtnW, menuBtnH, 1, landBorder, false)
 			landLabel := "  LAND"
 			if isLand {
@@ -138,7 +138,7 @@ func (m *RunwayMenu) Draw(screen *ebiten.Image, activeLanding, activeTakeoff str
 				toBg = color.RGBA{180, 100, 0, 255}
 				toBorder = color.RGBA{255, 200, 0, 255}
 			}
-			vector.DrawFilledRect(screen, float32(toX), float32(rowY), menuBtnW, menuBtnH, toBg, false)
+			vector.FillRect(screen, float32(toX), float32(rowY), menuBtnW, menuBtnH, toBg, false)
 			vector.StrokeRect(screen, float32(toX), float32(rowY), menuBtnW, menuBtnH, 1, toBorder, false)
 			toLabel := "  T/O"
 			if isTO {

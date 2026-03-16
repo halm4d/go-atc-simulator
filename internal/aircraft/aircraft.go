@@ -1,6 +1,7 @@
 package aircraft
 
 import (
+	"atc-sim/internal/airport"
 	"fmt"
 	"math"
 )
@@ -88,8 +89,8 @@ func NewAircraft(callsign string, typeCode string, x, y, altitude, heading, spee
 		TargetSpeed:    speed,
 		Phase:          PhaseArrival, // default; departure spawning overrides this
 		Selected:       false,
-		DataTagOffX:    15,  // Default top-right
-		DataTagOffY:    -42,
+		DataTagOffX:    DefaultDataTagOffX,
+		DataTagOffY:    DefaultDataTagOffY,
 	}
 }
 
@@ -104,13 +105,10 @@ func (a *Aircraft) IsCommandable() bool {
 // The inbound heading is the reciprocal of the aircraft's current heading (fly away first).
 func (a *Aircraft) EnterHold() {
 	// Outbound heading = current heading; inbound = reciprocal
-	a.HoldInboundHeading = a.Heading + 180
-	if a.HoldInboundHeading >= 360 {
-		a.HoldInboundHeading -= 360
-	}
+	a.HoldInboundHeading = airport.NormalizeHeading(a.Heading + 180)
 	// Leg duration: standard 1-minute legs (60s) adjusted for speed
 	// At 250 kts the default 1-min leg is fine; scale proportionally
-	a.HoldLegDuration = 60.0
+	a.HoldLegDuration = HoldLegDuration
 	a.HoldLeg = 1 // start on outbound leg (flying current heading away from fix)
 	a.HoldLegTimer = 0
 	a.Phase = PhaseHolding
@@ -133,12 +131,12 @@ func (a *Aircraft) Update(deltaTime float64) {
 		a.updateAirborne(deltaTime)
 	}
 
-	// Sample position for trail every 5 seconds of sim time
+	// Sample position for trail every TrailSampleInterval seconds of sim time
 	a.TrailTimer += deltaTime
-	if a.TrailTimer >= 5.0 {
+	if a.TrailTimer >= TrailSampleInterval {
 		a.TrailTimer = 0
 		a.Trail = append(a.Trail, [2]float64{a.X, a.Y})
-		if len(a.Trail) > 15 {
+		if len(a.Trail) > MaxTrailPoints {
 			a.Trail = a.Trail[1:]
 		}
 	}
@@ -149,10 +147,7 @@ func (a *Aircraft) Update(deltaTime float64) {
 func (a *Aircraft) updateHolding(deltaTime float64) {
 	a.HoldLegTimer += deltaTime
 
-	outboundHeading := a.HoldInboundHeading + 180
-	if outboundHeading >= 360 {
-		outboundHeading -= 360
-	}
+	outboundHeading := airport.NormalizeHeading(a.HoldInboundHeading + 180)
 
 	switch a.HoldLeg {
 	case 0: // inbound leg
@@ -176,10 +171,10 @@ func (a *Aircraft) updateHolding(deltaTime float64) {
 
 // updateTakeoffRoll handles physics during the takeoff roll
 func (a *Aircraft) updateTakeoffRoll(deltaTime float64) {
-	rotateSpeed := a.Type.MinSpeed * 1.1
+	rotateSpeed := a.Type.MinSpeed * RotateSpeedFactor
 
 	// Accelerate along runway (~4 knots/sec, roughly realistic for a jet)
-	a.Speed += 4.0 * deltaTime
+	a.Speed += TakeoffAccelRate * deltaTime
 
 	// Lock heading to runway heading during roll
 	a.Heading = a.RunwayHeading
@@ -197,10 +192,10 @@ func (a *Aircraft) updateTakeoffRoll(deltaTime float64) {
 	}
 
 	// Transition to climbout once airborne
-	if a.Altitude > a.AirportElevation+50 {
+	if a.Altitude > a.AirportElevation+AirborneAltThreshold {
 		a.Phase = PhaseClimbout
-		a.TargetSpeed = a.Type.MinSpeed * 1.3
-		a.TargetAltitude = a.AirportElevation + 5000 // default initial climb altitude
+		a.TargetSpeed = a.Type.MinSpeed * GoAroundSpeedFactor
+		a.TargetAltitude = a.AirportElevation + InitialClimbAlt
 	}
 }
 
@@ -210,7 +205,7 @@ func (a *Aircraft) updateFinalApproach(deltaTime float64) {
 	a.TargetHeading = a.RunwayHeading
 
 	// Slow down toward approach speed
-	approachSpeed := a.Type.MinSpeed * 1.05
+	approachSpeed := a.Type.MinSpeed * ApproachSpeedFactor
 	if a.TargetSpeed > approachSpeed {
 		a.TargetSpeed = approachSpeed
 	}
@@ -224,21 +219,21 @@ func (a *Aircraft) updateFinalApproach(deltaTime float64) {
 	distToThreshold := math.Sqrt(dx*dx + dy*dy)
 
 	// Follow the 3° ILS glide slope (318 ft per nm)
-	glideslopeAlt := a.AirportElevation + distToThreshold*318
+	glideslopeAlt := a.AirportElevation + distToThreshold*GlideSlopeGradient
 	if glideslopeAlt < a.Altitude {
 		a.TargetAltitude = glideslopeAlt
 	}
 
 	// Not cleared — go around if within 2 nm of threshold
-	if a.Phase == PhaseFinal && distToThreshold < 2.0 {
+	if a.Phase == PhaseFinal && distToThreshold < GoAroundDistanceNm {
 		a.Phase = PhaseArrival
-		a.TargetAltitude = a.AirportElevation + 3000
-		a.TargetSpeed = a.Type.MinSpeed * 1.3
+		a.TargetAltitude = a.AirportElevation + GoAroundAltFt
+		a.TargetSpeed = a.Type.MinSpeed * GoAroundSpeedFactor
 		return
 	}
 
 	// Touchdown when cleared and within 0.2 nm of threshold (touchdown zone)
-	if a.Phase == PhaseLanding && distToThreshold < 0.2 {
+	if a.Phase == PhaseLanding && distToThreshold < TouchdownDistanceNm {
 		a.Phase = PhaseLanded
 	}
 }
@@ -246,23 +241,17 @@ func (a *Aircraft) updateFinalApproach(deltaTime float64) {
 // updateAirborne handles normal airborne flight physics
 func (a *Aircraft) updateAirborne(deltaTime float64) {
 	// Update heading (turn toward target)
-	if math.Abs(a.Heading-a.TargetHeading) > 0.5 {
+	if math.Abs(a.Heading-a.TargetHeading) > HeadingTolerance {
 		turnDirection := a.getTurnDirection()
 		turnAmount := a.Type.TurnRate * deltaTime
 		a.Heading += turnDirection * turnAmount
 
-		// Normalize heading to 0-360
-		if a.Heading < 0 {
-			a.Heading += 360
-		}
-		if a.Heading >= 360 {
-			a.Heading -= 360
-		}
+		a.Heading = airport.NormalizeHeading(a.Heading)
 	}
 
 	// Update altitude (climb/descend toward target)
 	altDiff := a.TargetAltitude - a.Altitude
-	if math.Abs(altDiff) > 50 {
+	if math.Abs(altDiff) > AltitudeTolerance {
 		var verticalSpeed float64
 		if altDiff > 0 {
 			verticalSpeed = a.Type.ClimbRate
@@ -274,8 +263,8 @@ func (a *Aircraft) updateAirborne(deltaTime float64) {
 
 	// Update speed (accelerate/decelerate toward target)
 	speedDiff := a.TargetSpeed - a.Speed
-	if math.Abs(speedDiff) > 1 {
-		accelRate := 10.0 // knots per second
+	if math.Abs(speedDiff) > SpeedTolerance {
+		accelRate := AccelRate
 		if speedDiff > 0 {
 			a.Speed += accelRate * deltaTime
 			if a.Speed > a.TargetSpeed {
@@ -304,7 +293,7 @@ func (a *Aircraft) updateAirborne(deltaTime float64) {
 	a.Y += distance * math.Sin(headingRad)
 
 	// Transition from climbout to departure once above 1500ft AGL
-	if a.Phase == PhaseClimbout && a.Altitude > a.AirportElevation+1500 {
+	if a.Phase == PhaseClimbout && a.Altitude > a.AirportElevation+ClimboutAGLThreshold {
 		a.Phase = PhaseDeparture
 	}
 
@@ -329,7 +318,7 @@ func (a *Aircraft) advanceRoute() {
 	dy := targetY - a.Y
 	dist := math.Sqrt(dx*dx + dy*dy)
 
-	if dist < 2.0 {
+	if dist < WaypointArrivalNm {
 		// Reached this waypoint — pop it
 		a.RouteWaypoints = a.RouteWaypoints[1:]
 		a.RouteNames = a.RouteNames[1:]
@@ -343,13 +332,7 @@ func (a *Aircraft) advanceRoute() {
 	}
 
 	// Steer toward current waypoint
-	hdg := 90 - math.Atan2(dy, dx)*180/math.Pi
-	if hdg < 0 {
-		hdg += 360
-	}
-	if hdg >= 360 {
-		hdg -= 360
-	}
+	hdg := airport.NormalizeHeading(90 - math.Atan2(dy, dx)*180/math.Pi)
 	a.TargetHeading = hdg
 }
 
@@ -373,13 +356,7 @@ func (a *Aircraft) getTurnDirection() float64 {
 
 // CommandHeading sets a new heading command
 func (a *Aircraft) CommandHeading(heading float64) {
-	if heading < 0 {
-		heading += 360
-	}
-	if heading >= 360 {
-		heading -= 360
-	}
-	a.TargetHeading = heading
+	a.TargetHeading = airport.NormalizeHeading(heading)
 }
 
 // CommandAltitude sets a new altitude command
@@ -425,6 +402,6 @@ func (a *Aircraft) AltitudeSeparation(other *Aircraft) float64 {
 
 // ResetDataTag resets the data tag offset to the default top-right position.
 func (a *Aircraft) ResetDataTag() {
-	a.DataTagOffX = 15
-	a.DataTagOffY = -42
+	a.DataTagOffX = DefaultDataTagOffX
+	a.DataTagOffY = DefaultDataTagOffY
 }
