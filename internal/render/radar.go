@@ -14,27 +14,27 @@ import (
 )
 
 var (
-	// Colors matching real ATC displays
-	ColorBackground = color.RGBA{18, 26, 42, 255}     // Medium gray-blue (authentic ATC display tone)
-	ColorGrid       = color.RGBA{0, 40, 60, 255}     // Subtle grid
-	ColorRangeRing  = color.RGBA{0, 80, 120, 255}    // Range rings
-	ColorRunway     = color.RGBA{200, 200, 200, 255} // Bright gray runways
-	ColorAirport    = color.RGBA{255, 255, 255, 255} // White airport symbol
-	ColorWaypoint   = color.RGBA{0, 200, 255, 255}   // Cyan waypoints
-	ColorRoute      = color.RGBA{100, 100, 150, 180} // Purple-ish route lines (semi-transparent)
-	ColorAircraft       = color.RGBA{0, 220, 80, 255}    // Green — commanded arrival
-	ColorUncommanded    = color.RGBA{200, 200, 200, 255}  // White — no commands yet
-	ColorDeparture      = color.RGBA{80, 180, 255, 255}  // Sky blue — departure
-	ColorGround         = color.RGBA{255, 180, 0, 255}   // Amber — ground/holding
-	ColorTakeoffRoll    = color.RGBA{220, 220, 220, 255} // White — rolling for takeoff
-	ColorFinal          = color.RGBA{0, 200, 255, 255}   // Cyan — climbout / approach cone
-	ColorNeedsLanding   = color.RGBA{255, 130, 0, 255}   // Orange — on ILS, awaiting clearance
-	ColorLandingCleared = color.RGBA{180, 255, 180, 255} // Light green — cleared to land
-	ColorSelected       = color.RGBA{255, 255, 0, 255}   // Yellow — selected
-	ColorDataTag        = color.RGBA{0, 220, 80, 255}    // Green text (default)
-	ColorConflict       = color.RGBA{255, 100, 0, 255}   // Orange warning
-	ColorCritical       = color.RGBA{255, 0, 0, 255}     // Red critical
-	ColorUI             = color.RGBA{200, 200, 200, 255} // UI elements
+	// Colors — authentic ATC display palette (phosphor-green theme, STARS/ENROUTE reference)
+	ColorBackground     = color.RGBA{8, 10, 8, 255}      // Near-black, slight warm cast
+	ColorGrid           = color.RGBA{0, 28, 0, 255}       // Very dim green grid
+	ColorRangeRing      = color.RGBA{0, 55, 0, 255}       // Dim phosphor-green rings
+	ColorRunway         = color.RGBA{140, 140, 140, 255}  // Medium gray runways
+	ColorAirport        = color.RGBA{180, 180, 180, 255}  // Airport symbol
+	ColorWaypoint       = color.RGBA{0, 160, 160, 200}    // Dim teal waypoints
+	ColorRoute          = color.RGBA{40, 55, 40, 100}     // Nearly invisible route lines
+	ColorAircraft       = color.RGBA{0, 200, 70, 255}     // Green — commanded arrival
+	ColorUncommanded    = color.RGBA{180, 185, 180, 255}  // Slightly warm white
+	ColorDeparture      = color.RGBA{80, 160, 255, 255}   // Sky blue — departure
+	ColorGround         = color.RGBA{220, 160, 0, 255}    // Amber — ground/holding
+	ColorTakeoffRoll    = color.RGBA{200, 210, 200, 255}  // Slightly warm white
+	ColorFinal          = color.RGBA{0, 180, 220, 255}    // Dimmer cyan — approach
+	ColorNeedsLanding   = color.RGBA{255, 120, 0, 255}    // Orange — awaiting clearance
+	ColorLandingCleared = color.RGBA{120, 220, 120, 255}  // Green — cleared to land
+	ColorSelected       = color.RGBA{255, 240, 0, 255}    // Warmer yellow — selected
+	ColorDataTag        = color.RGBA{0, 200, 70, 255}     // Green text (default)
+	ColorConflict       = color.RGBA{255, 100, 0, 255}    // Orange warning (keep vivid)
+	ColorCritical       = color.RGBA{255, 30, 30, 255}    // Slightly softened red
+	ColorUI             = color.RGBA{160, 165, 160, 255}  // Dimmer chrome text
 )
 
 // labelRect tracks a placed label's bounding box for overlap avoidance.
@@ -216,7 +216,7 @@ func (r *Renderer) drawRangeRings(screen *ebiten.Image) {
 	// Draw rings every 10nm
 	for i := 1; i <= 6; i++ {
 		radius := float32(float64(i) * 10.0 * r.Scale)
-		vector.StrokeCircle(screen, centerX, centerY, radius, 1, ColorRangeRing, false)
+		vector.StrokeCircle(screen, centerX, centerY, radius, 1, color.RGBA{0, 50, 0, 60}, false)
 
 		// Label at 3 o'clock position (right side of ring) — clean, consistent
 		label := fmt.Sprintf("%d", i*10)
@@ -242,11 +242,11 @@ func (r *Renderer) drawRoutes(screen *ebiten.Image, routes []airport.Route, wayp
 		// Pick color based on route type
 		var routeColor, labelColor color.RGBA
 		if route.Type == "SID" {
-			routeColor = color.RGBA{50, 90, 60, 130}
-			labelColor = color.RGBA{70, 130, 80, 200}
+			routeColor = color.RGBA{30, 55, 30, 70}
+			labelColor = color.RGBA{50, 90, 50, 140}
 		} else {
-			routeColor = color.RGBA{50, 60, 110, 130}
-			labelColor = color.RGBA{70, 80, 150, 200}
+			routeColor = color.RGBA{30, 40, 70, 70}
+			labelColor = color.RGBA{50, 55, 100, 140}
 		}
 
 		// Draw lines connecting waypoints
@@ -331,7 +331,7 @@ func (r *Renderer) drawWaypoints(screen *ebiten.Image, waypoints []airport.Waypo
 
 		// Draw small delta triangle for waypoints (authentic ATC fix symbol)
 		size := float32(4)
-		wpCol := color.RGBA{0, 160, 200, 160}
+		wpCol := color.RGBA{0, 120, 120, 120}
 		vector.StrokeLine(screen, screenX-size, screenY+size, screenX+size, screenY+size, 1, wpCol, false)
 		vector.StrokeLine(screen, screenX+size, screenY+size, screenX, screenY-size, 1, wpCol, false)
 		vector.StrokeLine(screen, screenX, screenY-size, screenX-size, screenY+size, 1, wpCol, false)
@@ -362,7 +362,7 @@ func (r *Renderer) drawWaypoints(screen *ebiten.Image, waypoints []airport.Waypo
 
 		// Draw leader line from marker to label
 		if r.WaypointLabelOffsets[wp.Name] != ([2]int{}) {
-			vector.StrokeLine(screen, screenX, screenY, float32(lx), float32(ly+lh/2), 1, color.RGBA{0, 160, 200, 60}, false)
+			vector.StrokeLine(screen, screenX, screenY, float32(lx), float32(ly+lh/2), 1, color.RGBA{0, 100, 100, 40}, false)
 		}
 
 		ebitenutil.DebugPrintAt(screen, wp.Name, lx, ly)
@@ -457,9 +457,9 @@ func (r *Renderer) drawAirport(screen *ebiten.Image, airport *airport.Airport) {
 	}
 
 	// Draw airport symbol — small cross + circle, unobtrusive
-	vector.StrokeLine(screen, centerX-8, centerY, centerX+8, centerY, 1, color.RGBA{180, 180, 180, 200}, false)
-	vector.StrokeLine(screen, centerX, centerY-8, centerX, centerY+8, 1, color.RGBA{180, 180, 180, 200}, false)
-	vector.StrokeCircle(screen, centerX, centerY, 10, 2, color.RGBA{180, 180, 180, 200}, false)
+	vector.StrokeLine(screen, centerX-8, centerY, centerX+8, centerY, 1, color.RGBA{130, 130, 130, 160}, false)
+	vector.StrokeLine(screen, centerX, centerY-8, centerX, centerY+8, 1, color.RGBA{130, 130, 130, 160}, false)
+	vector.StrokeCircle(screen, centerX, centerY, 10, 2, color.RGBA{130, 130, 130, 160}, false)
 
 	// Draw airport label - larger and more visible
 	label := fmt.Sprintf("  %s  ", airport.ICAO)
@@ -502,7 +502,7 @@ func (r *Renderer) drawRunway(screen *ebiten.Image, airportX, airportY float32, 
 	vector.StrokeLine(screen, x1, y1, x2, y2, widthPx, ColorRunway, false)
 
 	// Draw center line (dashed effect with darker color)
-	dashColor := color.RGBA{100, 100, 100, 255}
+	dashColor := color.RGBA{50, 50, 50, 200}
 	vector.StrokeLine(screen, x1, y1, x2, y2, 2, dashColor, false)
 
 	// Draw runway edge lines for definition
@@ -521,7 +521,7 @@ func (r *Renderer) drawRunway(screen *ebiten.Image, airportX, airportY float32, 
 	edge2x2 := x2 - edgeOffset*float32(math.Cos(float64(perpAngle)))
 	edge2y2 := y2 + edgeOffset*float32(math.Sin(float64(perpAngle)))
 
-	edgeColor := color.RGBA{255, 255, 255, 180}
+	edgeColor := color.RGBA{160, 160, 160, 120}
 	vector.StrokeLine(screen, edge1x1, edge1y1, edge1x2, edge1y2, 1, edgeColor, false)
 	vector.StrokeLine(screen, edge2x1, edge2y1, edge2x2, edge2y2, 1, edgeColor, false)
 
@@ -549,8 +549,8 @@ func (r *Renderer) drawApproachCone(screen *ebiten.Image, apt *airport.Airport, 
 
 	coneNm := 15.0 // length of cone lines in nm
 
-	centerCol := color.RGBA{170, 80, 255, 200}   // solid purple — localizer course
-	boundaryCol := color.RGBA{170, 80, 255, 100} // dim — cone edges
+	centerCol := color.RGBA{140, 60, 200, 160}   // dim purple — localizer course
+	boundaryCol := color.RGBA{100, 40, 160, 70} // very dim — cone edges
 
 	for i, offset := range []float64{-15, 0, 15} {
 		hdg := approachFrom + offset
@@ -625,7 +625,7 @@ func (r *Renderer) drawApproachLine(screen *ebiten.Image, a *aircraft.Aircraft) 
 
 	lineColor := ColorFinal
 	if a.Phase == aircraft.PhaseLanding {
-		lineColor = color.RGBA{0, 255, 100, 200} // bright green when cleared
+		lineColor = color.RGBA{100, 200, 100, 160} // green when cleared
 	}
 	lineColor.A = 160
 
@@ -731,7 +731,7 @@ func (r *Renderer) drawAircraft(screen *ebiten.Image, a *aircraft.Aircraft, isSe
 		tgtSin := float32(math.Sin(tgtAngle))
 		tgtEndX := tipX + vectorPx*tgtCos
 		tgtEndY := tipY - vectorPx*tgtSin
-		tgtCol := color.RGBA{180, 220, 255, 140} // dim light-blue
+		tgtCol := color.RGBA{160, 200, 230, 110} // dim light-blue
 		for i := 0; i < 2; i++ {
 			t0 := float32(i) / 2.0
 			t1 := t0 + 0.35
@@ -796,7 +796,7 @@ func (r *Renderer) drawTrail(screen *ebiten.Image, a *aircraft.Aircraft, isSelec
 	for i, pos := range a.Trail {
 		// Older dots are more transparent; newest dot at alpha ~160
 		alpha := uint8(30 + 130*i/n)
-		dotCol := color.RGBA{40, 80, 200, alpha}
+		dotCol := color.RGBA{30, 100, 30, alpha}
 		sx, sy := r.worldToScreen(pos[0], pos[1])
 		vector.FillCircle(screen, sx, sy, 2, dotCol, false)
 	}
@@ -885,8 +885,8 @@ func (r *Renderer) drawDataTag(screen *ebiten.Image, a *aircraft.Aircraft, x, y 
 	// Dark backing rectangle for readability
 	// Width 136: covers row-2 "ALT→ALT SPD→SPD PHASE" (~125px max) + 6px padding
 	// Height 54: 3 rows × 16px line-height + 6px padding
-	vector.FillRect(screen, float32(tagX-3), float32(tagY-3), 136, 54, color.RGBA{0, 5, 15, 180}, false)
-	vector.StrokeRect(screen, float32(tagX-3), float32(tagY-3), 136, 54, 1, color.RGBA{0, 60, 90, 120}, false)
+	vector.FillRect(screen, float32(tagX-3), float32(tagY-3), 136, 54, color.RGBA{4, 6, 4, 200}, false)
+	vector.StrokeRect(screen, float32(tagX-3), float32(tagY-3), 136, 54, 1, color.RGBA{0, 70, 0, 100}, false)
 
 	// Active-field highlight row
 	if r.ActiveAircraft == a && r.ActiveField != "" {
@@ -894,8 +894,8 @@ func (r *Renderer) drawDataTag(screen *ebiten.Image, a *aircraft.Aircraft, x, y 
 		if r.ActiveField == "HEADING" {
 			highlightY = float32(tagY + 29) // row 3
 		}
-		vector.FillRect(screen, float32(tagX-3), highlightY, 136, 16, color.RGBA{0, 120, 180, 80}, false)
-		vector.StrokeRect(screen, float32(tagX-3), highlightY, 136, 16, 1, color.RGBA{0, 200, 255, 160}, false)
+		vector.FillRect(screen, float32(tagX-3), highlightY, 136, 16, color.RGBA{0, 100, 0, 80}, false)
+		vector.StrokeRect(screen, float32(tagX-3), highlightY, 136, 16, 1, color.RGBA{0, 180, 0, 140}, false)
 	}
 
 	// CA conflict alert badge above the tag
@@ -1029,10 +1029,10 @@ func (r *Renderer) drawConflicts(screen *ebiten.Image, conflicts []atc.Conflict,
 
 		var fillColor, ringColor color.RGBA
 		if crit {
-			fillColor = color.RGBA{255, 50, 50, uint8(60 + int(pulse*80))}
+			fillColor = color.RGBA{255, 50, 50, uint8(60 + int(pulse*60))}
 			ringColor = color.RGBA{255, 0, 0, uint8(180 + int(pulse*75))}
 		} else {
-			fillColor = color.RGBA{255, 120, 0, uint8(50 + int(pulse*60))}
+			fillColor = color.RGBA{255, 120, 0, uint8(50 + int(pulse*45))}
 			ringColor = color.RGBA{255, 100, 0, 200}
 		}
 
@@ -1045,8 +1045,8 @@ func (r *Renderer) drawConflicts(screen *ebiten.Image, conflicts []atc.Conflict,
 func (r *Renderer) drawUI(screen *ebiten.Image, airport *airport.Airport, aircraftCount, conflictCount int, simTime float64) {
 	sw := float32(r.ScreenWidth)
 	sh := float32(r.ScreenHeight)
-	panelBg := color.RGBA{0, 5, 15, 210}
-	panelBorder := color.RGBA{0, 80, 120, 200}
+	panelBg := color.RGBA{6, 8, 6, 230}
+	panelBorder := color.RGBA{0, 80, 0, 160}
 
 	// Top panel bar
 	vector.FillRect(screen, 0, 0, sw, 48, panelBg, false)
@@ -1089,7 +1089,7 @@ func (r *Renderer) drawWindRose(screen *ebiten.Image, cx, cy int, windDir, windS
 	cx32, cy32 := float32(cx), float32(cy)
 
 	// Outer ring
-	vector.StrokeCircle(screen, cx32, cy32, radius, 1, color.RGBA{0, 160, 200, 180}, false)
+	vector.StrokeCircle(screen, cx32, cy32, radius, 1, color.RGBA{0, 120, 0, 160}, false)
 
 	// Arrow pointing toward where wind comes FROM
 	// windDir=0 (FROM North) → tip points up (negative screen Y)
@@ -1100,7 +1100,7 @@ func (r *Renderer) drawWindRose(screen *ebiten.Image, cx, cy int, windDir, windS
 	tailX := cx32 - float32(math.Cos(rad))*(arrowLen*0.5)
 	tailY := cy32 + float32(math.Sin(rad))*(arrowLen*0.5)
 
-	arrowCol := color.RGBA{0, 220, 255, 230}
+	arrowCol := color.RGBA{0, 200, 0, 200}
 	vector.StrokeLine(screen, tailX, tailY, tipX, tipY, 2, arrowCol, false)
 
 	// Arrowhead (two short lines from the tip)
@@ -1125,7 +1125,7 @@ func (r *Renderer) drawNorthIndicator(screen *ebiten.Image) {
 	// Place just below the top HUD bar
 	baseY := float32(62)
 	tickLen := float32(14)
-	col := color.RGBA{160, 160, 160, 200}
+	col := color.RGBA{100, 140, 100, 180}
 	// Vertical tick pointing up
 	vector.StrokeLine(screen, cx, baseY, cx, baseY-tickLen, 1, col, false)
 	// Small arrowhead

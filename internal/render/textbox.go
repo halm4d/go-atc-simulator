@@ -33,9 +33,9 @@ func NewCommandTextBox(x, y, width, height int) *CommandTextBox {
 		Width:           width,
 		Height:          height,
 		IsDragging:      false,
-		BackgroundColor: color.RGBA{10, 20, 30, 230},  // Dark blue, semi-transparent
-		BorderColor:     color.RGBA{0, 200, 255, 255}, // Cyan border
-		TextColor:       color.RGBA{0, 255, 0, 255},   // Green text
+		BackgroundColor: color.RGBA{6, 8, 6, 235},     // Near-black, semi-transparent
+		BorderColor:     color.RGBA{0, 120, 0, 200},   // Dim green border
+		TextColor:       color.RGBA{0, 220, 80, 255},  // Phosphor green text
 		TitleBarHeight:  20,
 	}
 }
@@ -49,9 +49,9 @@ func (ctb *CommandTextBox) Draw(screen *ebiten.Image, commandMode, commandInput 
 		ctb.BackgroundColor, false)
 
 	// Draw title bar (draggable area)
-	titleBarColor := color.RGBA{0, 150, 200, 255} // Darker cyan for title bar
+	titleBarColor := color.RGBA{10, 20, 10, 255} // Very dark green title bar
 	if ctb.IsDragging {
-		titleBarColor = color.RGBA{0, 200, 255, 255} // Brighter when dragging
+		titleBarColor = color.RGBA{20, 40, 20, 255} // Slightly brighter when dragging
 	}
 	vector.FillRect(screen,
 		float32(ctb.X), float32(ctb.Y),
