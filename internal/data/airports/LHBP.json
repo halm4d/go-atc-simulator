@@ -38,10 +38,10 @@
     {"name": "VEBOS", "x": -25.3, "y": -8.0, "type": "STAR"},
     {"name": "BADOV", "x": -18.1, "y": 34.9, "type": "SID"},
     {"name": "LITKU", "x": 13.6, "y": 47.5, "type": "SID"},
-    {"name": "BP901", "x": -5.0, "y": 3.5, "type": "IF"},
-    {"name": "BP902", "x": 3.0, "y": -1.5, "type": "IF"},
-    {"name": "BP903", "x": -3.0, "y": 1.5, "type": "FAF"},
-    {"name": "BP904", "x": 1.5, "y": -0.5, "type": "FAF"}
+    {"name": "BP901", "x": -5.0, "y": 3.9, "type": "IF"},
+    {"name": "BP902", "x": 3.0, "y": -2.2, "type": "IF"},
+    {"name": "BP903", "x": -3.0, "y": 2.2, "type": "FAF"},
+    {"name": "BP904", "x": 1.5, "y": -0.9, "type": "FAF"}
   ],
   "routes": [
     {"name": "ABONY1A", "type": "STAR", "waypoints": ["ABONY", "BP902", "BP904"], "runway": "13L"},
