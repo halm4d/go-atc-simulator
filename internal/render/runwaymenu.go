@@ -76,9 +76,9 @@ func (m *RunwayMenu) Draw(screen *ebiten.Image, activeLanding, activeTakeoff str
 	h := m.totalHeight()
 	m.buttons = m.buttons[:0]
 
-	bgCol := color.RGBA{8, 18, 36, 245}
-	borderCol := color.RGBA{0, 200, 255, 255}
-	titleCol := color.RGBA{0, 90, 140, 255}
+	bgCol := color.RGBA{6, 8, 6, 248}
+	borderCol := color.RGBA{0, 120, 0, 200}
+	titleCol := color.RGBA{10, 20, 10, 255}
 
 	// Background + border
 	vector.FillRect(screen, float32(m.X), float32(m.Y), float32(menuW), float32(h), bgCol, false)

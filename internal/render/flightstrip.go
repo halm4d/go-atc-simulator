@@ -115,17 +115,17 @@ func (p *FlightStripPanel) Draw(screen *ebiten.Image, aircraftList []*aircraft.A
 	// Panel background
 	vector.FillRect(screen, float32(p.X), float32(p.Y),
 		float32(p.Width), float32(p.Height),
-		color.RGBA{10, 18, 30, 240}, false)
+		color.RGBA{6, 8, 6, 245}, false)
 
 	// Panel border
 	vector.StrokeRect(screen, float32(p.X), float32(p.Y),
 		float32(p.Width), float32(p.Height),
-		1, color.RGBA{0, 120, 180, 200}, false)
+		1, color.RGBA{0, 80, 0, 160}, false)
 
 	// Header bar
 	vector.FillRect(screen, float32(p.X), float32(p.Y),
 		float32(p.Width), float32(headerHeight),
-		color.RGBA{0, 60, 100, 220}, false)
+		color.RGBA{10, 20, 10, 230}, false)
 	ebitenutil.DebugPrintAt(screen, "FLIGHT STRIPS", p.X+6, p.Y+5)
 	countText := fmt.Sprintf("[%d]", len(aircraftList))
 	ebitenutil.DebugPrintAt(screen, countText, p.X+p.Width-len(countText)*6-8, p.Y+5)
@@ -164,7 +164,7 @@ func (p *FlightStripPanel) Draw(screen *ebiten.Image, aircraftList []*aircraft.A
 	// Separator line below list
 	sepY := float32(listY + listH)
 	vector.StrokeLine(screen, float32(p.X), sepY, float32(p.X+p.Width), sepY,
-		1, color.RGBA{0, 120, 180, 200}, false)
+		1, color.RGBA{0, 80, 0, 140}, false)
 
 	// Scrollbar
 	if len(sorted)*rowHeight > listH && listH > 0 {
@@ -177,9 +177,9 @@ func (p *FlightStripPanel) Draw(screen *ebiten.Image, aircraftList []*aircraft.A
 		}
 		thumbY := float32(listY) + float32(p.ScrollOffset)/float32(totalH)*trackH
 		vector.FillRect(screen, trackX, float32(listY), 3, trackH,
-			color.RGBA{30, 50, 70, 150}, false)
+			color.RGBA{20, 30, 20, 140}, false)
 		vector.FillRect(screen, trackX, thumbY, 3, thumbH,
-			color.RGBA{0, 150, 220, 200}, false)
+			color.RGBA{0, 140, 0, 180}, false)
 	}
 
 	// Detail and command sections (only when aircraft is selected)
@@ -283,7 +283,7 @@ func (p *FlightStripPanel) drawAircraftRow(screen *ebiten.Image, a *aircraft.Air
 	if rowY+rowHeight-1 >= clipTop && rowY+rowHeight-1 < clipBottom {
 		vector.StrokeLine(screen, float32(p.X+4), float32(rowY+rowHeight-1),
 			float32(p.X+p.Width-4), float32(rowY+rowHeight-1),
-			1, color.RGBA{40, 60, 80, 100}, false)
+			1, color.RGBA{30, 40, 30, 80}, false)
 	}
 }
 
@@ -292,19 +292,19 @@ func (p *FlightStripPanel) drawDetailSection(screen *ebiten.Image, a *aircraft.A
 	// Background
 	vector.FillRect(screen, float32(p.X), float32(y),
 		float32(p.Width), float32(detailHeight),
-		color.RGBA{5, 15, 25, 240}, false)
+		color.RGBA{4, 6, 4, 245}, false)
 
 	// Header
 	vector.FillRect(screen, float32(p.X), float32(y),
 		float32(p.Width), 16,
-		color.RGBA{0, 50, 80, 200}, false)
+		color.RGBA{8, 16, 8, 210}, false)
 	ebitenutil.DebugPrintAt(screen, fmt.Sprintf("DETAIL: %s", a.Callsign), p.X+6, y+3)
 
 	x := p.X + 6
 	ly := y + 20
 
-	col := color.RGBA{180, 200, 220, 255}
-	dimCol := color.RGBA{130, 150, 170, 255}
+	col := color.RGBA{180, 200, 180, 255}
+	dimCol := color.RGBA{130, 150, 130, 255}
 
 	// Type info
 	drawColorText(screen, fmt.Sprintf("%s - %s", a.Type.ICAO, a.Type.Name), x, ly, col)
@@ -324,7 +324,7 @@ func (p *FlightStripPanel) drawDetailSection(screen *ebiten.Image, a *aircraft.A
 
 	// Assignment
 	phase := phaseFullName(a)
-	cyanCol := color.RGBA{0, 200, 255, 255}
+	cyanCol := color.RGBA{0, 180, 180, 255}
 	if a.RunwayName != "" {
 		drawColorText(screen, fmt.Sprintf("RWY: %s  Phase: %s", a.RunwayName, phase), x, ly, cyanCol)
 	} else {
@@ -349,12 +349,12 @@ func (p *FlightStripPanel) drawCommandSection(screen *ebiten.Image, a *aircraft.
 	// Background
 	vector.FillRect(screen, float32(p.X), float32(y),
 		float32(p.Width), float32(commandHeight),
-		color.RGBA{8, 12, 20, 240}, false)
+		color.RGBA{4, 6, 4, 245}, false)
 
 	// Header
 	vector.FillRect(screen, float32(p.X), float32(y),
 		float32(p.Width), 16,
-		color.RGBA{0, 40, 70, 200}, false)
+		color.RGBA{6, 14, 6, 210}, false)
 	ebitenutil.DebugPrintAt(screen, "COMMANDS", p.X+6, y+3)
 
 	x := p.X + 6
@@ -377,9 +377,9 @@ func (p *FlightStripPanel) drawCommandSection(screen *ebiten.Image, a *aircraft.
 		case "DIRECT":
 			instruction = "Enter waypoint/route"
 		}
-		drawColorText(screen, instruction, x, ly, color.RGBA{150, 180, 200, 255})
+		drawColorText(screen, instruction, x, ly, color.RGBA{150, 175, 150, 255})
 		ly += 16
-		drawColorText(screen, "ENTER=Confirm ESC=Cancel", x, ly, color.RGBA{100, 130, 150, 255})
+		drawColorText(screen, "ENTER=Confirm ESC=Cancel", x, ly, color.RGBA{100, 125, 100, 255})
 	} else {
 		// Show available commands based on phase
 		cmdCol := color.RGBA{0, 200, 100, 255}
