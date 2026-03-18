@@ -1,6 +1,7 @@
 package main
 
 import (
+	"atc-sim/internal/config"
 	"atc-sim/internal/game"
 	"log"
 
@@ -8,13 +9,12 @@ import (
 )
 
 func main() {
-	// Set window title
-	ebiten.SetWindowTitle("ATC Simulator - KJFK")
+	ebiten.SetWindowTitle("ATC Simulator")
 	ebiten.SetWindowSize(1280, 720)
 	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
 
-	// Create and run game
-	g := game.NewGame()
+	cfg := config.Load()
+	g := game.NewGameWithConfig(cfg)
 
 	if err := ebiten.RunGame(g); err != nil {
 		log.Fatal(err)

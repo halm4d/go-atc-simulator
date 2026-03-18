@@ -4,7 +4,10 @@ import (
 	"atc-sim/internal/aircraft"
 	"atc-sim/internal/airport"
 	"atc-sim/internal/atc"
+	"atc-sim/internal/chat"
+	"atc-sim/internal/config"
 	"atc-sim/internal/data"
+	"atc-sim/internal/nlp"
 	"atc-sim/internal/render"
 	"fmt"
 	"image/color"
@@ -71,6 +74,14 @@ type Game struct {
 	SymbolDragCandidate *aircraft.Aircraft // set on mousedown over aircraft symbol
 	SymbolDragStartX    int
 	SymbolDragStartY    int
+
+	// Chat / NLP system
+	ChatHistory   *chat.History
+	ChatPanel     *render.ChatPanel
+	NLPEngine     *nlp.Engine
+	OllamaClient  *nlp.OllamaClient
+	Config        config.Config
+	PendingOllama bool // true when waiting for Ollama response
 }
 
 // NewGame creates a new game instance starting at the airport selector menu
@@ -84,6 +95,13 @@ func NewGame() *Game {
 		LastUpdate:    time.Now(),
 	}
 	return game
+}
+
+// NewGameWithConfig creates a new game with the given configuration.
+func NewGameWithConfig(cfg config.Config) *Game {
+	g := NewGame()
+	g.Config = cfg
+	return g
 }
 
 // startGame initialises the simulation for the chosen airport
@@ -120,6 +138,23 @@ func (g *Game) startGame(icao string) {
 	g.State = "PLAYING"
 
 	g.spawnInitialAircraft()
+
+	// Initialize chat system
+	g.ChatHistory = chat.NewHistory(50)
+	g.ChatPanel = render.NewChatPanel(g.Renderer.ScreenWidth, g.Renderer.ScreenHeight)
+
+	// Initialize NLP engine
+	if g.Config.Ollama.Enabled {
+		g.OllamaClient = nlp.NewOllamaClient(g.Config.Ollama.Endpoint, g.Config.Ollama.Model)
+		if err := g.OllamaClient.Ping(); err != nil {
+			g.ChatHistory.Add(chat.NewMessage(chat.MsgSystem, "SYS", "LLM unavailable, using standard parser"))
+			g.OllamaClient = nil
+		} else {
+			g.ChatHistory.Add(chat.NewMessage(chat.MsgSystem, "SYS",
+				fmt.Sprintf("LLM connected (%s)", g.Config.Ollama.Model)))
+		}
+	}
+	g.NLPEngine = nlp.NewEngine(g.OllamaClient)
 }
 
 // spawnInitialAircraft spawns the initial set of aircraft
@@ -637,6 +672,41 @@ func (g *Game) Update() error {
 		a.Update(deltaTime)
 	}
 
+	// Pilot-initiated requests (chat mode only)
+	if g.Config.InputMode == "chat" && g.ChatHistory != nil {
+		for _, a := range g.Aircraft {
+			// Track per-aircraft hold short time
+			if a.Phase == aircraft.PhaseHoldingShort {
+				a.HoldShortTimer += deltaTime
+			}
+
+			// Departure: ready for departure after holding short 10+ seconds
+			if a.Phase == aircraft.PhaseHoldingShort && a.IsDeparture &&
+				!a.HasRequestedDeparture && a.HoldShortTimer >= 10 {
+				a.HasRequestedDeparture = true
+				g.ChatHistory.Add(chat.NewMessage(chat.MsgPilotRequest, a.Callsign,
+					fmt.Sprintf("Holding short runway %s, ready for departure", a.RunwayName)))
+			}
+
+			// Arrival: requesting landing clearance on final
+			if a.Phase == aircraft.PhaseFinal && !a.HasRequestedLanding {
+				a.HasRequestedLanding = true
+				g.ChatHistory.Add(chat.NewMessage(chat.MsgPilotRequest, a.Callsign,
+					fmt.Sprintf("Established on approach runway %s, requesting landing clearance", a.RunwayName)))
+			}
+
+			// Route completion: requesting further instructions
+			if a.IsArrival && a.PrevHasRoute && !a.HasRoute && !a.HasRequestedInstructions {
+				a.HasRequestedInstructions = true
+				g.ChatHistory.Add(chat.NewMessage(chat.MsgPilotRequest, a.Callsign,
+					"Requesting further instructions"))
+			}
+
+			// Update PrevHasRoute for next frame
+			a.PrevHasRoute = a.HasRoute
+		}
+	}
+
 	// Apply wind drift to all airborne aircraft
 	g.applyWind(deltaTime)
 
@@ -789,6 +859,54 @@ func (g *Game) resetDragState() {
 
 // handleInput processes user input
 func (g *Game) handleInput() {
+	// F2 toggles input mode
+	if g.InputHandler.IsKeyJustPressed(ebiten.KeyF2) {
+		if g.Config.InputMode == "chat" {
+			g.Config.InputMode = "keyboard"
+			if g.ChatPanel != nil {
+				g.ChatPanel.Focused = false
+			}
+		} else {
+			g.Config.InputMode = "chat"
+			// Cancel any in-progress keyboard command
+			g.CommandMode = ""
+			g.CommandInput = ""
+		}
+	}
+
+	// Chat mode input handling
+	if g.Config.InputMode == "chat" && g.ChatPanel != nil {
+		submitted := g.ChatPanel.HandleInput(g.InputHandler.MouseX, g.InputHandler.MouseY)
+		if submitted != "" {
+			g.processChatInput(submitted)
+		}
+
+		// Poll Ollama result channel
+		if g.PendingOllama && g.OllamaClient != nil {
+			select {
+			case result := <-g.OllamaClient.ResultCh:
+				g.PendingOllama = false
+				if result.Err != nil {
+					g.ChatHistory.Add(chat.NewMessage(chat.MsgSystem, "SYS", "Say again?"))
+				} else {
+					msg, err := g.executeParsedCommand(result.Command)
+					if err != nil {
+						g.ChatHistory.Add(chat.NewMessage(chat.MsgSystem, "SYS", err.Error()))
+					} else {
+						g.ChatHistory.Add(msg)
+					}
+				}
+			default:
+				// Still waiting
+			}
+		}
+
+		// If chat panel is focused, skip ALL keyboard shortcuts
+		if g.ChatPanel.IsFocused() {
+			return
+		}
+	}
+
 	if g.handleUIToggles() {
 		return
 	}
@@ -1398,6 +1516,11 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	// Draw runway config menu (on top of everything)
 	g.RunwayMenu.Draw(screen, g.ActiveLandingRunway, g.ActiveTakeoffRunway)
 
+	// Draw chat panel
+	if g.Config.InputMode == "chat" && g.ChatPanel != nil && g.ChatHistory != nil {
+		g.ChatPanel.Draw(screen, g.ChatHistory)
+	}
+
 	// Draw help overlay (topmost layer)
 	if g.ShowHelp {
 		g.drawHelp(screen)
@@ -1547,4 +1670,47 @@ func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
 	g.Renderer.ScreenWidth = outsideWidth
 	g.Renderer.ScreenHeight = outsideHeight
 	return outsideWidth, outsideHeight
+}
+
+// processChatInput handles a submitted chat message.
+func (g *Game) processChatInput(text string) {
+	// Block input while waiting for Ollama response
+	if g.PendingOllama {
+		g.ChatHistory.Add(chat.NewMessage(chat.MsgSystem, "SYS", "Please wait..."))
+		return
+	}
+
+	// Add the player's message to chat
+	g.ChatHistory.Add(chat.NewMessage(chat.MsgATC, "ATC", text))
+
+	// Get active callsigns and waypoints for the parser
+	callsigns := make([]string, len(g.Aircraft))
+	for i, a := range g.Aircraft {
+		callsigns[i] = a.Callsign
+	}
+	waypoints := make([]string, len(g.Waypoints))
+	for i, wp := range g.Waypoints {
+		waypoints[i] = wp.Name
+	}
+
+	// Run through NLP engine
+	cmd, err := g.NLPEngine.Process(text, callsigns, waypoints)
+	if err != nil {
+		g.ChatHistory.Add(chat.NewMessage(chat.MsgSystem, "SYS", "Say again?"))
+		return
+	}
+	if cmd == nil {
+		// Ollama query was fired async
+		g.PendingOllama = true
+		g.ChatHistory.Add(chat.NewMessage(chat.MsgSystem, "SYS", "Processing..."))
+		return
+	}
+
+	// Execute the parsed command
+	msg, err := g.executeParsedCommand(cmd)
+	if err != nil {
+		g.ChatHistory.Add(chat.NewMessage(chat.MsgSystem, "SYS", err.Error()))
+		return
+	}
+	g.ChatHistory.Add(msg)
 }
