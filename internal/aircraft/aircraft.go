@@ -66,6 +66,13 @@ type Aircraft struct {
 	HasRoute       bool         // True when actively following a route
 	RouteName      string       // Route name for display (e.g., "DERUP1A")
 	AssignedRoute  string       // Originally assigned STAR/SID name (never cleared)
+
+	// Pilot request flags (for chat system)
+	HasRequestedDeparture    bool
+	HasRequestedLanding      bool
+	HasRequestedInstructions bool
+	PrevHasRoute             bool    // For detecting route-completion transitions
+	HoldShortTimer           float64 // Seconds spent in PhaseHoldingShort
 }
 
 // NewAircraft creates a new aircraft
