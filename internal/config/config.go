@@ -7,7 +7,6 @@ import (
 )
 
 type OllamaConfig struct {
-	Enabled  bool   `json:"enabled"`
 	Endpoint string `json:"endpoint"`
 	Model    string `json:"model"`
 }
@@ -21,9 +20,8 @@ func DefaultConfig() Config {
 	return Config{
 		InputMode: "keyboard",
 		Ollama: OllamaConfig{
-			Enabled:  false,
 			Endpoint: "http://localhost:11434",
-			Model:    "llama3.2:1b",
+			Model:    "qwen2.5:0.5b",
 		},
 	}
 }

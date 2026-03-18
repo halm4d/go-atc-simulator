@@ -12,13 +12,10 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.InputMode != "keyboard" {
 		t.Errorf("expected default InputMode 'keyboard', got %q", cfg.InputMode)
 	}
-	if cfg.Ollama.Enabled != false {
-		t.Error("expected Ollama disabled by default")
-	}
 	if cfg.Ollama.Endpoint != "http://localhost:11434" {
 		t.Errorf("unexpected default Ollama endpoint: %s", cfg.Ollama.Endpoint)
 	}
-	if cfg.Ollama.Model != "llama3.2:1b" {
+	if cfg.Ollama.Model != "qwen2.5:0.5b" {
 		t.Errorf("unexpected default Ollama model: %s", cfg.Ollama.Model)
 	}
 }
@@ -30,8 +27,6 @@ func TestSaveLoadRoundtrip(t *testing.T) {
 
 	cfg := DefaultConfig()
 	cfg.InputMode = "chat"
-	cfg.Ollama.Enabled = true
-
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		t.Fatal(err)
@@ -51,8 +46,5 @@ func TestSaveLoadRoundtrip(t *testing.T) {
 
 	if loaded.InputMode != "chat" {
 		t.Errorf("expected InputMode 'chat', got %q", loaded.InputMode)
-	}
-	if !loaded.Ollama.Enabled {
-		t.Error("expected Ollama enabled after load")
 	}
 }

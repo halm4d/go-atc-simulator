@@ -9,6 +9,7 @@ import (
 	"atc-sim/internal/data"
 	"atc-sim/internal/nlp"
 	"atc-sim/internal/render"
+	"errors"
 	"fmt"
 	"image/color"
 	"math"
@@ -82,6 +83,10 @@ type Game struct {
 	OllamaClient  *nlp.OllamaClient
 	Config        config.Config
 	PendingOllama bool // true when waiting for Ollama response
+
+	// Async model download
+	ModelPulling bool       // true while downloading model
+	modelPullCh  chan error // receives PullModel result
 }
 
 // NewGame creates a new game instance starting at the airport selector menu
@@ -143,18 +148,27 @@ func (g *Game) startGame(icao string) {
 	g.ChatHistory = chat.NewHistory(50)
 	g.ChatPanel = render.NewChatPanel(g.Renderer.ScreenWidth, g.Renderer.ScreenHeight)
 
-	// Initialize NLP engine
-	if g.Config.Ollama.Enabled {
-		g.OllamaClient = nlp.NewOllamaClient(g.Config.Ollama.Endpoint, g.Config.Ollama.Model)
-		if err := g.OllamaClient.Ping(); err != nil {
-			g.ChatHistory.Add(chat.NewMessage(chat.MsgSystem, "SYS", "LLM unavailable, using standard parser"))
-			g.OllamaClient = nil
-		} else {
-			g.ChatHistory.Add(chat.NewMessage(chat.MsgSystem, "SYS",
-				fmt.Sprintf("LLM connected (%s)", g.Config.Ollama.Model)))
-		}
+	// Initialize NLP engine — auto-detect Ollama, auto-pull model if missing
+	g.OllamaClient = nlp.NewOllamaClient(g.Config.Ollama.Endpoint, g.Config.Ollama.Model)
+	if err := g.OllamaClient.Ping(); errors.Is(err, nlp.ErrModelNotFound) {
+		g.ChatHistory.Add(chat.NewMessage(chat.MsgSystem, "SYS",
+			fmt.Sprintf("Downloading model %s...", g.Config.Ollama.Model)))
+		g.ModelPulling = true
+		g.modelPullCh = make(chan error, 1)
+		go func() {
+			g.modelPullCh <- g.OllamaClient.PullModel()
+		}()
+		g.NLPEngine = nlp.NewEngine(nil)
+	} else if err != nil {
+		g.ChatHistory.Add(chat.NewMessage(chat.MsgSystem, "SYS",
+			fmt.Sprintf("LLM unavailable: %v", err)))
+		g.OllamaClient = nil
+		g.NLPEngine = nlp.NewEngine(nil)
+	} else {
+		g.ChatHistory.Add(chat.NewMessage(chat.MsgSystem, "SYS",
+			fmt.Sprintf("LLM connected (%s)", g.Config.Ollama.Model)))
+		g.NLPEngine = nlp.NewEngine(g.OllamaClient)
 	}
-	g.NLPEngine = nlp.NewEngine(g.OllamaClient)
 }
 
 // spawnInitialAircraft spawns the initial set of aircraft
@@ -881,6 +895,24 @@ func (g *Game) handleInput() {
 			g.processChatInput(submitted)
 		}
 
+		// Poll async model download
+		if g.ModelPulling {
+			select {
+			case err := <-g.modelPullCh:
+				g.ModelPulling = false
+				if err != nil {
+					g.ChatHistory.Add(chat.NewMessage(chat.MsgSystem, "SYS",
+						fmt.Sprintf("LLM unavailable: %v", err)))
+					g.OllamaClient = nil
+				} else {
+					g.NLPEngine = nlp.NewEngine(g.OllamaClient)
+					g.ChatHistory.Add(chat.NewMessage(chat.MsgSystem, "SYS",
+						fmt.Sprintf("LLM connected (%s)", g.Config.Ollama.Model)))
+				}
+			default:
+			}
+		}
+
 		// Poll Ollama result channel
 		if g.PendingOllama && g.OllamaClient != nil {
 			select {
@@ -1519,6 +1551,21 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	// Draw chat panel
 	if g.Config.InputMode == "chat" && g.ChatPanel != nil && g.ChatHistory != nil {
 		g.ChatPanel.Draw(screen, g.ChatHistory)
+	}
+
+	// Draw model download overlay
+	if g.ModelPulling {
+		sw := float32(g.Renderer.ScreenWidth)
+		sh := float32(g.Renderer.ScreenHeight)
+		vector.FillRect(screen, 0, 0, sw, sh, color.RGBA{0, 0, 0, 160}, false)
+		panelW := float32(320)
+		panelH := float32(60)
+		px := sw/2 - panelW/2
+		py := sh/2 - panelH/2
+		vector.FillRect(screen, px, py, panelW, panelH, color.RGBA{10, 20, 10, 235}, false)
+		vector.StrokeRect(screen, px, py, panelW, panelH, 2, color.RGBA{0, 200, 0, 255}, false)
+		msg := fmt.Sprintf("Downloading model %s...", g.Config.Ollama.Model)
+		ebitenutil.DebugPrintAt(screen, msg, int(px)+12, int(py)+22)
 	}
 
 	// Draw help overlay (topmost layer)
