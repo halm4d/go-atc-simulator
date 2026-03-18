@@ -28,6 +28,8 @@ const (
 	CommandLineUpWait
 	CommandClearedTakeoff
 	CommandClearedLand
+	CommandDirect
+	CommandHold
 )
 
 // Command represents an ATC command
@@ -189,6 +191,10 @@ func (c *Command) GetCommandString() string {
 		return fmt.Sprintf("%s T/O %s", c.Aircraft.Callsign, c.Aircraft.RunwayName)
 	case CommandClearedLand:
 		return fmt.Sprintf("%s LND %s", c.Aircraft.Callsign, c.Aircraft.RunwayName)
+	case CommandDirect:
+		return fmt.Sprintf("%s DCT %s", c.Aircraft.Callsign, c.Aircraft.DirectTarget)
+	case CommandHold:
+		return fmt.Sprintf("%s HOLD", c.Aircraft.Callsign)
 	}
 	return ""
 }
