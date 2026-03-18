@@ -36,6 +36,7 @@ A realistic Air Traffic Control simulator built in Go with Ebiten, featuring rea
 - **Holding Patterns**: Right-hand racetrack holding patterns
 - **ILS Capture**: Automatic ILS establishment when aircraft are aligned with the runway
 - **Runway Configuration**: Right-click near the airport to configure active landing/takeoff runways
+- **Natural Language Commands**: Chat-based input with local LLM (Ollama) for natural ATC phrasing
 - **Zoom & Pan**: Mouse wheel zoom from 2-60 pixels per nautical mile
 
 ## Quick Start
@@ -64,6 +65,22 @@ python3 -m http.server 8080
 ```
 
 Then open your browser to `http://localhost:8080`
+
+### Natural Language Commands (Optional)
+
+The simulator supports natural language ATC commands via a local [Ollama](https://ollama.com/) instance. On startup, the game auto-detects Ollama and downloads the required model (`qwen2.5:0.5b`) automatically if needed.
+
+**Setup:**
+
+```bash
+# Option 1: Install Ollama directly
+# Download from https://ollama.com/ and run it
+
+# Option 2: Use Docker
+docker compose up -d
+```
+
+Once Ollama is running, start the game — it will connect automatically. If Ollama is not available, the game falls back to the built-in command parser.
 
 ## Controls
 
@@ -155,14 +172,25 @@ atc-sim/
 │   │   ├── loader.go                # JSON data loading
 │   │   └── airports/
 │   │       └── LHBP.json            # Budapest airport data
+│   ├── chat/
+│   │   └── message.go               # Chat message types and history
 │   ├── game/
 │   │   ├── game.go                  # Main game loop and state
+│   │   ├── chat_executor.go         # Executes parsed ATC commands
+│   │   ├── constants.go             # Game constants
 │   │   └── input.go                 # Input handling
+│   ├── nlp/
+│   │   ├── nlp.go                   # NLP engine (Tier 1 parser + Tier 2 LLM)
+│   │   ├── parser.go                # Rule-based ATC command parser
+│   │   └── ollama.go                # Ollama LLM client (async queries, auto-pull)
 │   └── render/
 │       ├── radar.go                 # Radar display rendering
 │       ├── flightstrip.go           # Flight strip panel UI
+│       ├── chatpanel.go             # Chat panel UI
 │       ├── textbox.go               # Command textbox UI
 │       └── runwaymenu.go            # Runway configuration menu
+├── config.example.json              # Example configuration
+├── docker-compose.yml               # Ollama Docker setup
 ├── web/
 │   ├── index.html                   # WASM loader page
 │   ├── game.wasm                    # (generated)
@@ -175,7 +203,7 @@ atc-sim/
 
 - Additional airports (KJFK, KLAX, EGLL, etc.)
 - Weather conditions
-- Voice commands (text-to-speech)
+- Voice commands (speech-to-text)
 - Multiplayer mode
 - Mobile app version
 
