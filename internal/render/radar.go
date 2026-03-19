@@ -210,8 +210,7 @@ func (r *Renderer) Draw(screen *ebiten.Image, airportData *airport.Airport, wayp
 
 // drawRangeRings draws distance rings from center
 func (r *Renderer) drawRangeRings(screen *ebiten.Image) {
-	centerX := float32(r.radarCenterX())
-	centerY := float32(r.ScreenHeight / 2)
+	centerX, centerY := r.worldToScreen(0, 0)
 
 	// Draw rings every 10nm
 	for i := 1; i <= 6; i++ {
@@ -448,8 +447,7 @@ func (r *Renderer) DrawDragToWaypoint(screen *ebiten.Image, waypoints []airport.
 
 // drawAirport draws the airport and runways
 func (r *Renderer) drawAirport(screen *ebiten.Image, airport *airport.Airport) {
-	centerX := float32(r.radarCenterX())
-	centerY := float32(r.ScreenHeight / 2)
+	centerX, centerY := r.worldToScreen(0, 0)
 
 	// Draw runways first (behind airport symbol)
 	for _, runway := range airport.Runways {

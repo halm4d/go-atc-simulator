@@ -87,6 +87,13 @@ type Game struct {
 	// Async model download
 	ModelPulling bool       // true while downloading model
 	modelPullCh  chan error // receives PullModel result
+
+	// Radar panning (middle mouse drag)
+	Panning    bool
+	PanStartX  int
+	PanStartY  int
+	PanOriginX float64 // CenterX at drag start
+	PanOriginY float64 // CenterY at drag start
 }
 
 // NewGame creates a new game instance starting at the airport selector menu
@@ -942,6 +949,9 @@ func (g *Game) handleInput() {
 	if g.handleUIToggles() {
 		return
 	}
+	if g.handleRadarPan() {
+		return
+	}
 	if g.handleDragOperations() {
 		return
 	}
@@ -954,6 +964,31 @@ func (g *Game) handleInput() {
 	g.handleRightClick()
 	g.handleRunwayMenu()
 	g.handleCommandInput()
+}
+
+// handleRadarPan handles middle-mouse-button drag to pan the radar view.
+// Returns true if input was consumed.
+func (g *Game) handleRadarPan() bool {
+	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonMiddle) {
+		g.Panning = true
+		g.PanStartX = g.InputHandler.MouseX
+		g.PanStartY = g.InputHandler.MouseY
+		g.PanOriginX = g.Renderer.CenterX
+		g.PanOriginY = g.Renderer.CenterY
+		return true
+	}
+	if g.Panning {
+		if ebiten.IsMouseButtonPressed(ebiten.MouseButtonMiddle) {
+			dx := g.InputHandler.MouseX - g.PanStartX
+			dy := g.InputHandler.MouseY - g.PanStartY
+			g.Renderer.CenterX = g.PanOriginX - float64(dx)/g.Renderer.Scale
+			g.Renderer.CenterY = g.PanOriginY + float64(dy)/g.Renderer.Scale
+		} else {
+			g.Panning = false
+		}
+		return true
+	}
+	return false
 }
 
 // handleUIToggles handles Tab toggle, F1 help, help overlay ESC.
