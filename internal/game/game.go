@@ -7,6 +7,7 @@ import (
 	"atc-sim/internal/chat"
 	"atc-sim/internal/config"
 	"atc-sim/internal/data"
+	"atc-sim/internal/logger"
 	"atc-sim/internal/nlp"
 	"atc-sim/internal/render"
 	"errors"
@@ -118,6 +119,7 @@ func NewGameWithConfig(cfg config.Config) *Game {
 
 // startGame initialises the simulation for the chosen airport
 func (g *Game) startGame(icao string) {
+	logger.Info("starting game", "airport", icao)
 	apt := airport.GetAirport(icao)
 
 	// Default runways from data
@@ -156,6 +158,7 @@ func (g *Game) startGame(icao string) {
 	g.ChatPanel = render.NewChatPanel(g.Renderer.ScreenWidth, g.Renderer.ScreenHeight)
 
 	// Initialize NLP engine — auto-detect Ollama, auto-pull model if missing
+	logger.Info("initializing NLP engine", "endpoint", g.Config.Ollama.Endpoint, "model", g.Config.Ollama.Model)
 	g.OllamaClient = nlp.NewOllamaClient(g.Config.Ollama.Endpoint, g.Config.Ollama.Model)
 	if err := g.OllamaClient.Ping(); errors.Is(err, nlp.ErrModelNotFound) {
 		g.ChatHistory.Add(chat.NewMessage(chat.MsgSystem, "SYS",
@@ -908,10 +911,12 @@ func (g *Game) handleInput() {
 			case err := <-g.modelPullCh:
 				g.ModelPulling = false
 				if err != nil {
+					logger.Error("model pull failed", "error", err)
 					g.ChatHistory.Add(chat.NewMessage(chat.MsgSystem, "SYS",
 						fmt.Sprintf("LLM unavailable: %v", err)))
 					g.OllamaClient = nil
 				} else {
+					logger.Info("model pull complete, LLM ready")
 					g.NLPEngine = nlp.NewEngine(g.OllamaClient)
 					g.ChatHistory.Add(chat.NewMessage(chat.MsgSystem, "SYS",
 						fmt.Sprintf("LLM connected (%s)", g.Config.Ollama.Model)))
@@ -926,6 +931,7 @@ func (g *Game) handleInput() {
 			case result := <-g.OllamaClient.ResultCh:
 				g.PendingOllama = false
 				if result.Err != nil {
+					logger.Warn("ollama query returned error", "error", result.Err)
 					g.ChatHistory.Add(chat.NewMessage(chat.MsgSystem, "SYS", "Say again?"))
 				} else {
 					msg, err := g.executeParsedCommand(result.Command)

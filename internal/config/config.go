@@ -1,6 +1,7 @@
 package config
 
 import (
+	"atc-sim/internal/logger"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -49,16 +50,20 @@ func configPath() (string, error) {
 func Load() Config {
 	path, err := configPath()
 	if err != nil {
+		logger.Warn("config path error, using defaults", "error", err)
 		return DefaultConfig()
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
+		logger.Info("no config file found, using defaults", "path", path)
 		return DefaultConfig()
 	}
 	cfg := DefaultConfig()
 	if err := json.Unmarshal(data, &cfg); err != nil {
+		logger.Error("failed to parse config, using defaults", "path", path, "error", err)
 		return DefaultConfig()
 	}
+	logger.Info("config loaded from file", "path", path)
 	return cfg
 }
 
